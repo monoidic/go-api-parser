@@ -42,14 +42,14 @@ const (
 	COMPLEX64  = "complex8"
 	FLOAT32    = "float4"
 	FLOAT64    = "float8"
-	INT        = "int" // TODO
+	INT        = "int" // TODO doesn't follow C semantics, same bits as host; mismatch
 	INT16      = "sword"
 	INT32      = "sdword"
 	INT64      = "sqword"
 	INT8       = "sbyte"
 	RUNE       = INT32
 	STRING     = "string"
-	UINT       = "uint" // TODO
+	UINT       = "uint" // TODO same as int
 	UINT16     = "word"
 	UINT32     = "dword"
 	UINT64     = "qword"
@@ -57,40 +57,41 @@ const (
 	UINTPTR    = "uintptr_t"
 
 	UNKNOWN = "undefined8"
-	POINTER = "undefined()"
+	POINTER = "undefined*"
 	STRUCT  = "struct"
 	CHAN    = "chan"
 	MAP     = "map"
 	SLICE   = "slice"
-	FUNCPTR = "code()"
+	FUNCPTR = "code*"
+	ERROR   = "error"
 )
 
 // mapping to Ghidra types
 // TODO handle int/uint, iface, string
 var builtinTypes = map[string]string{
-	"any":         INTERFACE,
-	"bool":        BOOLEAN,
-	"byte":        BYTE,
-	"complex128":  COMPLEX128,
-	"complex64":   COMPLEX64,
-	"error":       INTERFACE,
-	"float32":     FLOAT32,
-	"float64":     FLOAT64,
-	"int":         INT, // TODO doesn't follow C semantics, same bits as host; mismatch
-	"int16":       INT16,
-	"int32":       INT32,
-	"int64":       INT64,
-	"int8":        INT8,
-	"rune":        RUNE,
-	"string":      STRING,
-	"uint":        UINT, // TODO same as int
-	"uint16":      UINT16,
-	"uint32":      UINT32,
-	"uint64":      UINT64,
-	"uint8":       UINT8,
-	"uintptr":     UINTPTR,
-	"interface{}": INTERFACE,
-	"interface":   INTERFACE,
+	"bool":       BOOLEAN,
+	"byte":       BYTE,
+	"complex128": COMPLEX128,
+	"complex64":  COMPLEX64,
+	"error":      ERROR,
+	"float32":    FLOAT32,
+	"float64":    FLOAT64,
+	"int":        INT,
+	"int16":      INT16,
+	"int32":      INT32,
+	"int64":      INT64,
+	"int8":       INT8,
+	"rune":       RUNE,
+	"string":     STRING,
+	"uint":       UINT,
+	"uint16":     UINT16,
+	"uint32":     UINT32,
+	"uint64":     UINT64,
+	"uint8":      UINT8,
+	"uintptr":    UINTPTR,
+	//"interface{}": INTERFACE,
+	//"interface": INTERFACE,
+	//"any": INTERFACE,
 }
 
 type symbolNameMap struct {
@@ -103,8 +104,13 @@ type symbolNameMap struct {
 }
 
 func doubleLookup(symMap symbolNameMap, arch, s string) (string, bool) {
+	arches := []string{arch, "all"}
+	return doubleLookupArches(symMap, arches, s)
+}
+
+func doubleLookupArches(symMap symbolNameMap, arches []string, s string) (string, bool) {
 	baseMap := symMap.ShortTypeMap
-	for _, key := range []string{arch, "all"} {
+	for _, key := range arches {
 		if m, ok := baseMap[key]; ok {
 			if t, ok := m[s]; ok {
 				return t, true
@@ -150,31 +156,23 @@ func typeToString(pkgName, arch string, fset *token.FileSet, symMap symbolNameMa
 			return t, true
 		}
 		s = fmt.Sprintf("%s.%s", pkgName, s)
-		fmt.Println("AAAAAAA", s, pkgName, arch)
-		for _, baseMap := range []map[string]map[string]string{symMap.FullTypeMap, symMap.ShortTypeMap} {
-			for _, key := range []string{arch, "all"} {
-				if m, ok := baseMap[key]; ok {
-					if t, ok := m[s]; ok {
-						return t, true
-					}
-				}
-			}
+
+		arches := []string{arch, "all"}
+		if pkgName == "syscall" { // workaround for e.g syscall.(WaitStatus).Continued
+			arches = append(arches, "freebsd-arm64-cgo")
 		}
-		return "", false
+		return doubleLookupArches(symMap, arches, s)
 	case *ast.StarExpr:
 		if s, final := typeToString(pkgName, arch, fset, symMap, ft.X); final {
 			return s + "*", true
 		}
 		return "", false
 	case *ast.SelectorExpr:
-		// selector already set, no star, probably don't need to loop back in on typeToString here?
-		// TODO look up real path (e.g )
-		//return ft.X.(*ast.Ident).Name + "." + ft.Sel.Name, false
 		s := fmt.Sprintf("%s.%s", ft.X.(*ast.Ident).Name, ft.Sel.Name)
 		return doubleLookup(symMap, arch, s)
 	case *ast.ArrayType:
 		if ft.Len == nil {
-			return "slice", true
+			return SLICE, true
 		}
 		literal := ft.Len.(*ast.BasicLit)
 		if literal.Kind != token.INT {
@@ -186,7 +184,7 @@ func typeToString(pkgName, arch string, fset *token.FileSet, symMap symbolNameMa
 		}
 		return "", false
 	default:
-		fmt.Println("unhandled type")
+		fmt.Println("unhandled AST expression type")
 		ast.Print(fset, field)
 		panic(nil)
 	}
@@ -259,8 +257,9 @@ func parseMethod(fset *token.FileSet, symMap symbolNameMap, line string) FuncInf
 		pkgArch = pkgData[2][1 : len(pkgData[2])-1]
 	}
 
-	definitionParts := strings.SplitN(definition, " ", 2)
+	definitionParts := strings.SplitN(definition, " ", 3)
 	definitionParts[0] = "func"
+	recvString := definitionParts[1]
 	definition = strings.Join(definitionParts, " ")
 
 	root := check1(parser.ParseFile(fset, "<input>", "package x\n"+definition, parser.AllErrors))
@@ -304,7 +303,7 @@ func parseMethod(fset *token.FileSet, symMap symbolNameMap, line string) FuncInf
 		results = make([]string, 0)
 	}
 
-	symbolName := fmt.Sprintf("%s.%s", pkgName, fdecl.Name)
+	symbolName := fmt.Sprintf("%s.%s.%s", pkgName, recvString, fdecl.Name)
 
 	return FuncInfo{
 		symbolName: symbolName,
@@ -363,12 +362,6 @@ func parseType(fset *token.FileSet, symMap symbolNameMap, line string) (string, 
 	return pkgArch, typeIdent, typeReal, success
 }
 
-/*
-func parseMethod(pkgInfo, definition string) string {
-	return "unimplemented"
-}
-*/
-
 func main() {
 	fd := check1(os.Open("api.txt"))
 
@@ -381,7 +374,6 @@ func main() {
 	for scanner.Scan() {
 		line := scanner.Text()
 		definition := strings.SplitN(line, ", ", 2)[1]
-
 		defType := strings.SplitN(definition, " ", 2)[0]
 
 		switch defType {
@@ -409,11 +401,8 @@ func main() {
 		doubleInsert(symMap.FuncMap, info.arch, info.symbolName, info)
 	}
 
-	//methods = nil
-
 	for _, line := range methods {
-		info := parseMethod(fset, symMap, line) // TODO
-		fmt.Printf("%#v\n", info)
+		info := parseMethod(fset, symMap, line)
 		doubleInsert(symMap.FuncMap, info.arch, info.symbolName, info)
 	}
 
