@@ -95,10 +95,8 @@ var builtinTypes = map[string]string{
 }
 
 type symbolNameMap struct {
-	// e.g log/syslog.Priority => int
-	FullTypeMap map[string]map[string]string
-	// same as FullTypeMap, but with truncated path, e.g syslog.Priority => int
-	ShortTypeMap map[string]map[string]string
+	// maps truncated type path to type identifier, e.g ip.Address => struct
+	TypeMap map[string]map[string]string
 	// full path => function info
 	FuncMap map[string]map[string]FuncInfo
 }
@@ -109,7 +107,7 @@ func doubleLookup(symMap symbolNameMap, arch, s string) (string, bool) {
 }
 
 func doubleLookupArches(symMap symbolNameMap, arches []string, s string) (string, bool) {
-	baseMap := symMap.ShortTypeMap
+	baseMap := symMap.TypeMap
 	for _, key := range arches {
 		if m, ok := baseMap[key]; ok {
 			if t, ok := m[s]; ok {
@@ -155,9 +153,14 @@ func typeToString(pkgName, arch string, fset *token.FileSet, symMap symbolNameMa
 		if t, ok := builtinTypes[s]; ok {
 			return t, true
 		}
-		s = fmt.Sprintf("%s.%s", pkgName, s)
+		splitPkg := strings.Split(pkgName, "/")
+		pkgTail := splitPkg[len(splitPkg)-1]
+		s = fmt.Sprintf("%s.%s", pkgTail, s)
 
-		arches := []string{arch, "all"}
+		arches := []string{arch}
+		if arch != "all" {
+			arches = append(arches, "all")
+		}
 		if pkgName == "syscall" { // workaround for e.g syscall.(WaitStatus).Continued
 			arches = append(arches, "freebsd-arm64-cgo")
 		}
@@ -227,6 +230,7 @@ func parseFunc(fset *token.FileSet, symMap symbolNameMap, line string) FuncInfo 
 		for i, result := range funcType.Results.List {
 			resultS, final := typeToString(pkgName, pkgArch, fset, symMap, result.Type)
 			if !final {
+				ast.Print(fset, result.Type)
 				panic(1)
 			}
 			results[i] = resultS
@@ -326,8 +330,7 @@ func parseTypes(fset *token.FileSet, symMap symbolNameMap, lines []string) {
 			}
 			splitSym := strings.Split(typeIdent, "/")
 			shortKey := splitSym[len(splitSym)-1]
-			doubleInsert(symMap.FullTypeMap, pkgArch, typeIdent, typeReal)
-			doubleInsert(symMap.ShortTypeMap, pkgArch, shortKey, typeReal)
+			doubleInsert(symMap.TypeMap, pkgArch, shortKey, typeReal)
 		}
 		newLen := len(unparsed)
 		if newLen == prevLen {
@@ -364,9 +367,7 @@ func parseType(fset *token.FileSet, symMap symbolNameMap, line string) (string, 
 
 func main() {
 	fd := check1(os.Open("api.txt"))
-
 	scanner := bufio.NewScanner(fd)
-
 	fset := token.NewFileSet()
 
 	var funcs, types, methods []string
@@ -389,9 +390,8 @@ func main() {
 
 	// arch => key => value
 	symMap := symbolNameMap{
-		FullTypeMap:  make(map[string]map[string]string),
-		ShortTypeMap: make(map[string]map[string]string),
-		FuncMap:      make(map[string]map[string]FuncInfo),
+		TypeMap: make(map[string]map[string]string),
+		FuncMap: make(map[string]map[string]FuncInfo),
 	}
 
 	parseTypes(fset, symMap, types)
