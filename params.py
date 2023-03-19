@@ -5,7 +5,11 @@ import json
 
 from ghidra.program.model.data import Pointer32DataType, SignedDWordDataType, DWordDataType, BooleanDataType, ByteDataType, Complex16DataType
 from ghidra.program.model.data import Complex8DataType, Float4DataType, Float8DataType, SignedWordDataType, SignedQWordDataType, SignedByteDataType
-from ghidra.program.model.data import WordDataType, QWordDataType, Undefined8DataType, UndefinedDataType, ArrayDataType, Pointer64DataType
+from ghidra.program.model.data import WordDataType, QWordDataType, Undefined8DataType, UndefinedDataType, ArrayDataType, Pointer64DataType, AbstractFloatDataType, FumctionDefinitionType
+from ghidra.program.model.listing import VariableStorage, ParameterImpl
+from ghidra.app.cmd.function import ApplyFunctionSignatureCmd
+from ghidra.program.model.symbol import SourceType
+
 
 with open('out.json') as fd:
     definitions = json.load(fd)
@@ -17,18 +21,6 @@ typemap.update(definitions['TypeMap'][current_arch]
 
 funcmap = definitions['FuncMap']['all']
 funcmap.update(definitions['FuncMap'][current_arch]
-
-# TODO
-# https://ghidra.re/ghidra_docs/api/ghidra/program/model/listing/VariableStorage.html
-# https://ghidra.re/ghidra_docs/api/ghidra/program/model/listing/ParameterImpl.html
-# https://ghidra.re/ghidra_docs/api/ghidra/program/model/data/FunctionDefinitionDataType.html
-# https://ghidra.re/ghidra_docs/api/ghidra/app/cmd/function/ApplyFunctionSignatureCmd.html
-# VariableStorage from registers
-# ParameterImpl from above VariableStorage + datatype
-# create FunctionDefinitionDataType with name, populate arguments with setArguments()
-# apply return type on FunctionDefinitionDataType via setReturnType
-# (TODO!!! also need to semi-dynamically generate return types for multi-valued returns)
-# apply signature to function via ApplyFunctionSignatureCmd
 
 ptr_size = currentProgram.getDefaultPointerSize()
 if ptr_size == 8:
@@ -81,7 +73,7 @@ type_map = {
     'uintptr': uint_t,
     'undefined8': Undefined8DataType,
     'undefined': UndefinedDataType,
-    'struct': lambda: ptr(UndefinedDataType()),  # TODO get struct definitions
+#    'struct': lambda: ptr(UndefinedDataType()),  # TODO get struct definitions
     'slice': lambda: slice,
     'error': lambda: iface,
     'code': UndefinedDataType, # TODO something better here?
@@ -101,8 +93,53 @@ def get_type(s):
 
     return type_map[s]()
 
-def get_definition(name):
-    pass
+# TODO
+# https://ghidra.re/ghidra_docs/api/ghidra/program/model/listing/VariableStorage.html
+# https://ghidra.re/ghidra_docs/api/ghidra/program/model/listing/ParameterImpl.html
+# https://ghidra.re/ghidra_docs/api/ghidra/program/model/data/FunctionDefinitionDataType.html
+# https://ghidra.re/ghidra_docs/api/ghidra/app/cmd/function/ApplyFunctionSignatureCmd.html
+# VariableStorage from registers
+# ParameterImpl from above VariableStorage + datatype
+# create FunctionDefinitionDataType with name, populate arguments with setArguments()
+# apply return type on FunctionDefinitionDataType via setReturnType
+# (TODO!!! also need to semi-dynamically generate return types for multi-valued returns)
+# apply signature to function via ApplyFunctionSignatureCmd
+
+def get_definition(addr, name):
+    signature = funcmap.get(name)
+    if not signature:
+        return None
+
+    if any('struct' in signature[s] for s in ('Params', 'Results')):
+        return None
+
+    int_reg_i = 0
+    float_reg_i = 0
+
+    params = []
+    # returns = []
+
+    for param in signature['Params']:
+        datatype = get_type(param)
+        # TODO check datatype.getLength()
+        if isinstance(datatype, AbstractFloatDataType):
+            if float_reg_i == len(float_registers):
+                return None
+            reg = registers[float_registers[float_reg_i]]
+            float_reg_i += i
+            storage = VariableStorage(currentProgram, reg)
+        else:
+            if int_reg_i == len(integer_registers):
+                return None
+
+        param = ParameterImpl('parameter_{}'.format(len(params)+1), datatype, storage, currentProgram)
+        params.append(param)
+
+    funcdef = FunctionDefinitionDataType(nane)
+    funcdef.setArguments(params)
+
+    ApplyFunctionSignatureCmd(addr, funcdef, SourceType.ANALYSIS)
+
 
 def main():
     pass
