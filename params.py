@@ -2,15 +2,17 @@
 
 from itertools import chain
 import json
+import os.path
 
 from ghidra.program.model.listing import VariableStorage, ParameterImpl
 from ghidra.app.cmd.function import ApplyFunctionSignatureCmd
 from ghidra.program.model.symbol import SourceType
-rom ghidra.program.model.listing.Function import FunctionUpdateType
+from ghidra.program.model.listing.Function import FunctionUpdateType
 
 from ghidra.program.model import data
 
-with open('out.json') as fd:
+filename = os.path.dirname(__file__) + '/out.json'
+with open(filename) as fd:
     definitions = json.load(fd)
 
 current_arch = 'linux-amd64'  # TODO
@@ -31,18 +33,18 @@ else:
     int_t = data.SignedDWordDataType
     uint_t = data.DWordDataType
 
-string = data.StructureDataType('go_string', ptr_size * 2)
-string.insertAtOffset(0, ptr(), ptr_size, 'ptr', None)
-string.insertAtOffset(ptr_size, int_t(), ptr_size, 'len', None)
+string = data.StructureDataType('go_string', 0)
+string.add(ptr(), ptr_size, 'ptr', None)
+string.add(int_t(), ptr_size, 'len', None)
 
-slice = data.StructureDataType('go_slice', ptr_size * 3)
-slice.insertAtOffset(0, ptr(data.Undefined1DataType()), ptr_size, 'ptr', None)
-slice.insertAtOffset(ptr_size, int_t(), ptr_size, 'len', None)
-slice.insertAtOffset(ptr_size*2, int_t(), ptr_size, 'cap', None)
+slice = data.StructureDataType('go_slice', 0)
+slice.add(ptr(data.Undefined1DataType()), ptr_size, 'ptr', None)
+slice.add(int_t(), ptr_size, 'len', None)
+slice.add(int_t(), ptr_size, 'cap', None)
 
-iface = data.StructureDataType('go_iface', ptr_size * 2)
-iface.insertAtOffset(0, ptr(data.Undefined1DataType()), ptr_size, 'type_ptr', None)
-iface.insertAtOffset(ptr_size, int_t(), ptr_size, 'impl_ptr', None)
+iface = data.StructureDataType('go_iface', 0)
+iface.add(ptr(data.Undefined1DataType()), ptr_size, 'type_ptr', None)
+iface.add(ptr(data.Undefined1DataType()), ptr_size, 'impl_ptr', None)
 
 integer_registers = ['RAX', 'RBX', 'RCX', 'RDI', 'RSI', 'R8', 'R9', 'R10', 'R11']
 float_registers = ['XMM{}'.format(i) for i in range(15)]
@@ -125,16 +127,13 @@ def assign_registers(registers, length):
         reg = registers[0]
         reg_len = reg.getBitLength() >> 3
         if reg_len > length:
-            children = reg.getChildRegisters()
-            if not children:  # can this even happen?
-                return None
-            registers[0] = children[0]
+            registers[0] = reg.getChildRegisters()[0]
             continue
 
         out.append(reg)
         registers = registers[1:]
         length -= reg_len
-        if length == 0:
+        if not length:
             return out
 
     return None
@@ -153,17 +152,17 @@ def get_params(param_types):
     for param in param_types:
         datatype = get_type(param)
         datatype_len = datatype.getLength()
-        # TODO check datatype.getLength()
+
         if isinstance(datatype, data.AbstractFloatDataType):
-            assigned = assign_registers(remaining_float_registers, datatype_len)
-            if assigned is None:
-                return None
-            remaining_float_registers = remaining_float_registers[len(assigned):]
+            remaining_registers = remaining_float_registers
         else:
-            assigned = assign_registers(remaining_int_registers, datatype_len)
+            remaining_registers = remaining_int_registers
+
+        assigned = assign_registers(remaining_registers, datatype_len)
             if assigned is None:
                 return None
-            remaining_int_registers = remaining_int_registers[len(assigned):]
+
+        remaining_registers[:len(assigned)] = []
 
         storage = VariableStorage(currentProgram, *assigned)
 
@@ -188,17 +187,11 @@ def main():
             continue
 
         arguments = get_params(signature['Params'])
-        if arguments is None:
-            continue
+        if arguments is not None:
+            func.replaceParameters(FunctionUpdateType.CUSTOM_STORAGE, True, SourceType.USER_DEFINED, *arguments)
 
-        print(name)
-        print(arguments)
 
-        func
+        # TODO setReturn
 
-        #func_dt = data.FunctionDefinitionDataType(func.name)
-        #func_dt.setArguments(arguments)
-
-        #ApplyFunctionSignatureCmd(func.getEntryPoint(), func_dt, SourceType.USER_DEFINED)
 
 main()

@@ -42,14 +42,14 @@ const (
 	COMPLEX64  = "complex64"
 	FLOAT32    = "float32"
 	FLOAT64    = "float64"
-	INT        = "int" // TODO doesn't follow C semantics, same bits as host; mismatch
+	INT        = "int" // same number of bits as host
 	INT16      = "int16"
 	INT32      = "int32"
 	INT64      = "int64"
 	INT8       = "int8"
 	RUNE       = "rune"
 	STRING     = "string"
-	UINT       = "uint" // TODO same as int
+	UINT       = "uint" // same number of bits as host
 	UINT16     = "uint16"
 	UINT32     = "uint32"
 	UINT64     = "uint64"
