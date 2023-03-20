@@ -3,46 +3,45 @@
 from itertools import chain
 import json
 
-from ghidra.program.model.data import Pointer32DataType, SignedDWordDataType, DWordDataType, BooleanDataType, ByteDataType, Complex16DataType
-from ghidra.program.model.data import Complex8DataType, Float4DataType, Float8DataType, SignedWordDataType, SignedQWordDataType, SignedByteDataType
-from ghidra.program.model.data import WordDataType, QWordDataType, Undefined8DataType, UndefinedDataType, ArrayDataType, Pointer64DataType, AbstractFloatDataType, FumctionDefinitionType
 from ghidra.program.model.listing import VariableStorage, ParameterImpl
 from ghidra.app.cmd.function import ApplyFunctionSignatureCmd
 from ghidra.program.model.symbol import SourceType
+rom ghidra.program.model.listing.Function import FunctionUpdateType
 
+from ghidra.program.model import data
 
 with open('out.json') as fd:
     definitions = json.load(fd)
 
-current_arch = 'linux-amd64' # TODO
+current_arch = 'linux-amd64'  # TODO
 
 typemap = definitions['TypeMap']['all']
-typemap.update(definitions['TypeMap'][current_arch]
+typemap.update(definitions['TypeMap'][current_arch])
 
 funcmap = definitions['FuncMap']['all']
-funcmap.update(definitions['FuncMap'][current_arch]
+funcmap.update(definitions['FuncMap'][current_arch])
 
 ptr_size = currentProgram.getDefaultPointerSize()
 if ptr_size == 8:
-    ptr = Pointer64DataType
-    int_t = SignedQWordDataType
-    uint_t = QWordDataType
+    ptr = data.Pointer64DataType
+    int_t = data.SignedQWordDataType
+    uint_t = data.QWordDataType
 else:
-    ptr = Pointer32DataType
-    int_t = SignedDWordDataType
-    uint_t = DWordDataType
+    ptr = data.Pointer32DataType
+    int_t = data.SignedDWordDataType
+    uint_t = data.DWordDataType
 
-string = StructureDataType('go_string', ptr_size * 2)
+string = data.StructureDataType('go_string', ptr_size * 2)
 string.insertAtOffset(0, ptr(), ptr_size, 'ptr', None)
 string.insertAtOffset(ptr_size, int_t(), ptr_size, 'len', None)
 
-slice = StructureDataType('go_slice', ptr_size * 3)
-slice.insertAtOffset(0, ptr(UndefinedDataType()), ptr_size, 'ptr', None)
+slice = data.StructureDataType('go_slice', ptr_size * 3)
+slice.insertAtOffset(0, ptr(data.Undefined1DataType()), ptr_size, 'ptr', None)
 slice.insertAtOffset(ptr_size, int_t(), ptr_size, 'len', None)
 slice.insertAtOffset(ptr_size*2, int_t(), ptr_size, 'cap', None)
 
-iface = StructureDataType('go_iface', ptr_size * 2)
-iface.insertAtOffset(0, ptr(UndefinedDataType()), ptr_size, 'type_ptr', None)
+iface = data.StructureDataType('go_iface', ptr_size * 2)
+iface.insertAtOffset(0, ptr(data.Undefined1DataType()), ptr_size, 'type_ptr', None)
 iface.insertAtOffset(ptr_size, int_t(), ptr_size, 'impl_ptr', None)
 
 integer_registers = ['RAX', 'RBX', 'RCX', 'RDI', 'RSI', 'R8', 'R9', 'R10', 'R11']
@@ -54,33 +53,36 @@ registers = {
 
 type_map = {
     'iface': lambda: iface,
-    'bool': BooleanDataType,
-    'byte': ByteDataType,
-    'complex128': Complex16DataType,
-    'complex64': Complex8DataType,
-    'float32': Float4DataType,
-    'float64': Float8DataType,
+    'bool': data.BooleanDataType,
+    'byte': data.ByteDataType,
+    'complex128': data.Complex16DataType,
+    'complex64': data.Complex8DataType,
+    'float32': data.Float4DataType,
+    'float64': data.Float8DataType,
     'int': int_t,
-    'int16': SignedWordDataType,
-    'int32': SignedDWordDataType,
-    'int64': SignedQWordDataType,
-    'int8': SignedByteDataType,
+    'int16': data.SignedWordDataType,
+    'int32': data.SignedDWordDataType,
+    'int64': data.SignedQWordDataType,
+    'int8': data.SignedByteDataType,
     'string': lambda: string,
     'uint': uint_t,
-    'uint16': WordDataType,
-    'uint32': DWordDataType,
-    'uint64': QWordDataType,
+    'uint16': data.WordDataType,
+    'uint32': data.DWordDataType,
+    'uint64': data.QWordDataType,
+    'uint8': data.ByteDataType,
     'uintptr': uint_t,
-    'undefined8': Undefined8DataType,
-    'undefined': UndefinedDataType,
-#    'struct': lambda: ptr(UndefinedDataType()),  # TODO get struct definitions
+    'undefined8': data.Undefined8DataType,
+    'undefined': data.Undefined1DataType,
+    # TODO get struct definitions
+    'struct': data.Undefined1DataType,
     'slice': lambda: slice,
     'error': lambda: iface,
-    'code': UndefinedDataType, # TODO something better here?
+    'code': data.Undefined1DataType,  # TODO something better here?
     # probably don't care about the internals of these
-    'chan': lambda: ptr(UndefinedDataType()),
-    'map': lambda: ptr(UndefinedDataType()),
+    'chan': lambda: ptr(data.Undefined1DataType()),
+    'map': lambda: ptr(data.Undefined1DataType()),
 }
+
 
 def get_type(s):
     if s.endswith('*'):
@@ -89,7 +91,7 @@ def get_type(s):
         element_s, num = s[:-1].rsplit('[', 1)
         arr_len = int(num)
         element_type = get_type(element_s)
-        return ArrayDataType(element_type, arr_len, element_type.getLength())
+        return data.ArrayDataType(element_type, arr_len, element_type.getLength())
 
     return type_map[s]()
 
@@ -104,44 +106,99 @@ def get_type(s):
 # apply return type on FunctionDefinitionDataType via setReturnType
 # (TODO!!! also need to semi-dynamically generate return types for multi-valued returns)
 # apply signature to function via ApplyFunctionSignatureCmd
+#
+# nvm FunctionDB.replaceParameters()
 
-def get_definition(addr, name):
-    signature = funcmap.get(name)
-    if not signature:
+
+def functions_iter():
+    func = getFirstFunction()
+    while func is not None:
+        yield func
+        func  = getFunctionAfter(func)
+
+
+def assign_registers(registers, length):
+    registers = registers[:]
+
+    out = []
+    while registers:
+        reg = registers[0]
+        reg_len = reg.getBitLength() >> 3
+        if reg_len > length:
+            children = reg.getChildRegisters()
+            if not children:  # can this even happen?
+                return None
+            registers[0] = children[0]
+            continue
+
+        out.append(reg)
+        registers = registers[1:]
+        length -= reg_len
+        if length == 0:
+            return out
+
+    return None
+
+def get_params(param_types):
+    if 'struct' in param_types:
         return None
 
-    if any('struct' in signature[s] for s in ('Params', 'Results')):
-        return None
+    remaining_int_registers, remaining_float_registers = (
+        [registers[name] for name in reglist]
+        for reglist in (integer_registers, float_registers)
+    )
 
-    int_reg_i = 0
-    float_reg_i = 0
+    result_params = []
 
-    params = []
-    # returns = []
-
-    for param in signature['Params']:
+    for param in param_types:
         datatype = get_type(param)
+        datatype_len = datatype.getLength()
         # TODO check datatype.getLength()
-        if isinstance(datatype, AbstractFloatDataType):
-            if float_reg_i == len(float_registers):
+        if isinstance(datatype, data.AbstractFloatDataType):
+            assigned = assign_registers(remaining_float_registers, datatype_len)
+            if assigned is None:
                 return None
-            reg = registers[float_registers[float_reg_i]]
-            float_reg_i += i
-            storage = VariableStorage(currentProgram, reg)
+            remaining_float_registers = remaining_float_registers[len(assigned):]
         else:
-            if int_reg_i == len(integer_registers):
+            assigned = assign_registers(remaining_int_registers, datatype_len)
+            if assigned is None:
                 return None
+            remaining_int_registers = remaining_int_registers[len(assigned):]
 
-        param = ParameterImpl('parameter_{}'.format(len(params)+1), datatype, storage, currentProgram)
-        params.append(param)
+        storage = VariableStorage(currentProgram, *assigned)
 
-    funcdef = FunctionDefinitionDataType(nane)
-    funcdef.setArguments(params)
+        result_params.append(ParameterImpl(
+            'parameter_{}'.format(len(result_params) + 1),
+            datatype,
+            storage,
+            currentProgram,
+        ))
 
-    ApplyFunctionSignatureCmd(addr, funcdef, SourceType.ANALYSIS)
+    return result_params
 
 
 def main():
-    pass
+    for func in functions_iter():
+        try:
+            name = func.name.encode()
+        except UnicodeEncodeError:
+            continue
+        signature = funcmap.get(name)
+        if signature is None:
+            continue
+
+        arguments = get_params(signature['Params'])
+        if arguments is None:
+            continue
+
+        print(name)
+        print(arguments)
+
+        func
+
+        #func_dt = data.FunctionDefinitionDataType(func.name)
+        #func_dt.setArguments(arguments)
+
+        #ApplyFunctionSignatureCmd(func.getEntryPoint(), func_dt, SourceType.USER_DEFINED)
 
 main()
