@@ -120,8 +120,6 @@ def get_dynamic_type(types):
     dynamic_type_map[name] = t
     return t
 
-# TODO!!! also need to semi-dynamically generate return types for multi-valued returns
-
 def functions_iter():
     func = getFirstFunction()
     while func is not None:
@@ -176,7 +174,7 @@ def get_params(param_types):
         if assigned is None:
             return None
 
-        # TODO amd64_specific
+        # TODO amd64-specific
         float_reg_num = sum(1 for reg in assigned if reg.getTypeFlags() & reg.TYPE_VECTOR)
         int_reg_num = len(assigned) - float_reg_num
 
