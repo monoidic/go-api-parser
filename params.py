@@ -227,7 +227,7 @@ def recursive_struct_unpack(datatype):
 
     for component in datatype.getDefinedComponents():
         # no yield from in py2
-        for v in recursive_struct_unpack(component):
+        for v in recursive_struct_unpack(component.getDataType()):
             yield v
 
 
