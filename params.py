@@ -5,24 +5,28 @@ import json
 import os.path
 
 from ghidra.program.model.listing import VariableStorage, ParameterImpl
-from ghidra.app.cmd.function import ApplyFunctionSignatureCmd
 from ghidra.program.model.symbol import SourceType
 from ghidra.program.model.listing.Function import FunctionUpdateType
 
 from ghidra.program.model import data
 
+# load file with function signatures
 filename = os.path.dirname(__file__) + '/out.json'
 with open(filename) as fd:
     definitions = json.load(fd)
 
-current_arch = 'windows-amd64'  # TODO
+# current architecture, for architectures-specific functions
+# TODO Ghidra can report platform info, get this dynamically
+# once more platforms are supported
+current_arch = 'windows-amd64'
 
-typemap = definitions['TypeMap']['all']
-typemap.update(definitions['TypeMap'][current_arch])
-
+# get function signatures applying to all architectures
+# + those specific to the current architecture
 funcmap = definitions['FuncMap']['all']
 funcmap.update(definitions['FuncMap'][current_arch])
 
+# set type of int and uint, and type and size of ptr depending on
+# whether the system is 32-bit or 64-bit
 ptr_size = currentProgram.getDefaultPointerSize()
 if ptr_size == 8:
     ptr = data.Pointer64DataType
@@ -33,34 +37,49 @@ else:
     int_t = data.SignedDWordDataType
     uint_t = data.DWordDataType
 
-string = data.StructureDataType('go_string', 0)
-string.add(ptr(), ptr_size, 'ptr', None)
-string.add(int_t(), ptr_size, 'len', None)
+# create structs for non-trivial built-in types
 
-slice = data.StructureDataType('go_slice', 0)
-slice.add(ptr(data.Undefined1DataType()), ptr_size, 'ptr', None)
-slice.add(int_t(), ptr_size, 'len', None)
-slice.add(int_t(), ptr_size, 'cap', None)
+# similar to slice; data pointer and len, but no capacity
+go_string = data.StructureDataType('go_string', 0)
+go_string.add(ptr(), ptr_size, 'ptr', None)
+go_string.add(int_t(), ptr_size, 'len', None)
 
-iface = data.StructureDataType('go_iface', 0)
-iface.add(ptr(data.Undefined1DataType()), ptr_size, 'type_ptr', None)
-iface.add(ptr(data.Undefined1DataType()), ptr_size, 'impl_ptr', None)
+# https://go.dev/blog/slices-intro
+go_slice = data.StructureDataType('go_slice', 0)
+go_slice.add(ptr(data.Undefined1DataType()), ptr_size, 'ptr', None)
+go_slice.add(int_t(), ptr_size, 'len', None)
+go_slice.add(int_t(), ptr_size, 'cap', None)
 
-chan = data.StructureDataType('go_chan', 0)
-chan.add(ptr(data.Undefined1DataType()), ptr_size, 'ptr', None)
+# mentioned in https://github.com/golang/go/blob/master/src/cmd/compile/abi-internal.md#memory-layout
+go_iface = data.StructureDataType('go_iface', 0)
+go_iface.add(ptr(data.Undefined1DataType()), ptr_size, 'type_ptr', None)
+go_iface.add(ptr(data.Undefined1DataType()), ptr_size, 'impl_ptr', None)
 
-map = data.StructureDataType('go_map', 0)
-map.add(ptr(data.Undefined1DataType()), ptr_size, 'ptr', None)
+# mentioned in the above link to always be a pointer; internal structure important
+go_chan = data.StructureDataType('go_chan', 0)
+go_chan.add(ptr(data.Undefined1DataType()), ptr_size, 'ptr', None)
 
+# same as chan
+go_map = data.StructureDataType('go_map', 0)
+go_map.add(ptr(data.Undefined1DataType()), ptr_size, 'ptr', None)
+
+
+# architecture-specific; TODO select based on architecture
+# https://github.com/golang/go/blob/master/src/cmd/compile/abi-internal.md#amd64-architecture
 integer_registers = ['RAX', 'RBX', 'RCX', 'RDI', 'RSI', 'R8', 'R9', 'R10', 'R11']
 float_registers = ['XMM{}'.format(i) for i in range(15)]
+
+# map name string, e.g "RAX", to Ghidra register object corresponding to the register
+# https://ghidra.re/ghidra_docs/api/ghidra/program/model/lang/Register.html
 registers = {
     reg: currentProgram.getRegister(reg)
     for reg in chain(integer_registers, float_registers)
 }
 
+# map Go type name strings to constructors matching said types in Ghidra
+# https://ghidra.re/ghidra_docs/api/ghidra/program/model/data/package-summary.html
 type_map = {
-    'iface': lambda: iface,
+    'iface': lambda: go_iface,
     'bool': data.BooleanDataType,
     'byte': data.ByteDataType,
     'complex128': data.Complex16DataType,
@@ -72,7 +91,7 @@ type_map = {
     'int32': data.SignedDWordDataType,
     'int64': data.SignedQWordDataType,
     'int8': data.SignedByteDataType,
-    'string': lambda: string,
+    'string': lambda: go_string,
     'uint': uint_t,
     'uint16': data.WordDataType,
     'uint32': data.DWordDataType,
@@ -83,19 +102,26 @@ type_map = {
     'undefined': data.Undefined1DataType,
     # TODO get struct definitions
     'struct': data.Undefined1DataType,
-    'slice': lambda: slice,
-    'error': lambda: iface,
+    'slice': lambda: go_slice,
+    'error': lambda: go_iface,
     'code': data.Undefined1DataType,  # TODO something better here?
     # probably don't care about the internals of these
-    'chan': lambda: chan,
-    'map': lambda: map,
+    'chan': lambda: go_chan,
+    'map': lambda: go_map,
 }
 
-
+# recursively parses a type string
+# expects a base string matching a type listed in the above type_map,
+# and potentially a number of pointer or array type suffixes,
+# which it will recursively convert into the proper types,
+# e.g "int*" on a 32-bit platform into
+# a data.Pointer32DataType referencing a data.SignedDWordDataType,
+# or a "int[4]*" into a data.Pointer32DataType referencing a data.ArrayDataType
+# referencing 4 instances of data.SignedDWordDataType
 def get_type(s):
-    if s.endswith('*'):
+    if s.endswith('*'):  # pointer
         return ptr(get_type(s[:-1]))
-    if s.endswith(']'):
+    if s.endswith(']'):  # array
         element_s, num = s[:-1].rsplit('[', 1)
         arr_len = int(num)
         element_type = get_type(element_s)
@@ -103,10 +129,14 @@ def get_type(s):
 
     return type_map[s]()
 
-
+# for dynamically created struct types; see below
 dynamic_type_map = {}
 
-
+# Ghidra expects functions to only return a single value, however,
+# Go allows multiple types to be returned. To facilitate this,
+# struct types are generated, which would be assigned in the same way
+# in registers or on the stack
+# TODO handle params partially passed on the stack, partially in registers
 def get_dynamic_type(types):
     name = '_'.join(chain(['go_dynamic'], types))
     if name in dynamic_type_map:
@@ -120,21 +150,27 @@ def get_dynamic_type(types):
     dynamic_type_map[name] = t
     return t
 
+# simplify iterating over functions
+# generator that yields each defined function within the currenct binary
 def functions_iter():
     func = getFirstFunction()
     while func is not None:
         yield func
         func = getFunctionAfter(func)
 
-
+# attempts to assign each data type given in the iterable `types`
+# (for handling composite types like structs) into registers
+# if all given types do not fit into registers, returns None,
+# otherwise returns a list of the used registers for the given datatype
 def assign_registers(int_registers, float_registers, types):
+    # clone + reverse for .pop() and .append()
     int_registers = int_registers[::-1]
     float_registers = float_registers[::-1]
     out = []
 
     for t in types:
         t_len = t.getLength()
-        while t_len:
+        while t_len:  # allocate parts of
             if isinstance(t, data.AbstractFloatDataType):
                 registers = float_registers
             else:
@@ -145,19 +181,24 @@ def assign_registers(int_registers, float_registers, types):
 
             reg = registers.pop()
             reg_len = reg.getBitLength() >> 3
-            if reg_len <= t_len:
+            if reg_len <= t_len:  # fits at least partially into the register
                 out.append(reg)
                 t_len -= reg_len
-            else:
+            else:  # register is too big, get smaller-sized "child register"
                 registers.append(reg.getChildRegisters()[0])
 
     return out
 
-
+# takes a list of strings as argument and attempts to assign
+# the types into parameters; returns a list of ParameterImpl values
+# with the datatypes and parameter storage if successful, and None
+# if it fails
 def get_params(param_types):
+    # TODO structs currently unhandled
     if 'struct' in param_types:
         return None
 
+    # keep track of currently used and available registers
     remaining_int_registers, remaining_float_registers = (
         [registers[name] for name in reglist]
         for reglist in (integer_registers, float_registers)
@@ -174,7 +215,10 @@ def get_params(param_types):
         if assigned is None:
             return None
 
-        # TODO amd64-specific
+        # TODO currently amd64-specific, not all platforms may use vector storage for this
+        # when fixing, ensure child registers work too, e.g XMM0's child register XMM0Q or RAX's child EAX
+        #
+        #  count number of integer and float registers used by the assignment and remove from available registers
         float_reg_num = sum(1 for reg in assigned if reg.getTypeFlags() & reg.TYPE_VECTOR)
         int_reg_num = len(assigned) - float_reg_num
 
@@ -192,11 +236,14 @@ def get_params(param_types):
 
     return result_params
 
-
+# same as get_params, but for return values; as only a single return value is handled by Ghidra,
+# returns a dynamically generated struct type with similar storage characteristics
 def get_results(result_types):
+    # TODO structs currently unhandled
     if 'struct' in result_types:
         return None
 
+    # special-case for no return type
     if len(result_types) == 0:
         return data.VoidDataType(), VariableStorage.VOID_STORAGE
 
@@ -219,14 +266,17 @@ def get_results(result_types):
 
     return datatype, storage
 
-
+# recursively unpack types into component types
+# just yields a single type for a non-composite type,
+# and recursively yields each component type of each component type
+# for structs
 def recursive_struct_unpack(datatype):
     if not isinstance(datatype, data.StructureDataType):
         yield datatype
         return
 
     for component in datatype.getDefinedComponents():
-        # no yield from in py2
+        # no `yield from` in py2
         for v in recursive_struct_unpack(component.getDataType()):
             yield v
 
