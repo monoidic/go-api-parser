@@ -23,7 +23,7 @@ Undefined1DataType = MockGhidraDataType(1)
 
 @dataclass
 class MockGhidraPointerType(MockGhidraDataType):
-    reference_type: MockGhidraDataType = Undefined1DataType
+    reference_type: MockGhidraDataType = field(default_factory=Undefined1DataType)  # noqa:E501
 
 
 @dataclass
@@ -93,3 +93,21 @@ class VariableStorage:
 class MockGhidraVoidDatatype:
     def __call__(self) -> 'MockGhidraVoidDatatype':
         return self
+
+
+@dataclass
+class ParameterImpl:
+    name: str
+    datatype: MockGhidraDataType
+    storage: VariableStorage
+    _program: None = field(repr=False, default=None)
+
+
+@dataclass
+class MockGhidraArrayDataType:
+    data_type: MockGhidraDataType
+    array_length: int
+    element_length: int
+
+    def getLength(self) -> int:
+        return self.array_length * self.element_length

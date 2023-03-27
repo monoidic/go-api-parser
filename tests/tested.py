@@ -2,7 +2,7 @@ from itertools import chain
 
 import data
 
-from mocked_ghidra import MockGhidraRegister, VariableStorage
+from mocked_ghidra import MockGhidraRegister, VariableStorage, ParameterImpl
 
 # start of setup
 ptr = data.Pointer64DataType
@@ -128,7 +128,7 @@ def assign_registers(int_registers, float_registers, types):
     for t in types:
         t_len = t.getLength()
         while t_len:  # allocate parts of
-            if isinstance(t, data.AbstractFloatDataType):
+            if False:
                 registers = float_registers
             else:
                 registers = int_registers

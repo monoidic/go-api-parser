@@ -5,10 +5,12 @@ from mocked_ghidra import Undefined1DataType as _Undefined1DataType
 from mocked_ghidra import MockGhidraStructureType
 from mocked_ghidra import MockGhidraVoidDatatype
 from mocked_ghidra import MockedGhidraAbstractFloatDataType
+from mocked_ghidra import MockGhidraArrayDataType
 
 AbstractFloatDataType = MockedGhidraAbstractFloatDataType
 StructureDataType = MockGhidraStructureType
 VoidDataType = MockGhidraVoidDatatype
+ArrayDataType = MockGhidraArrayDataType
 
 BooleanDataType = MockGhidraDataType(1)
 ByteDataType = MockGhidraDataType(1)
