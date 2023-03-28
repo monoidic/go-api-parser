@@ -8,6 +8,8 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -15,6 +17,59 @@ import (
 // it'd handle a bunch of runtime functions and unexported functions/methods as well,
 // plus make potentially extending this for extracting function signatures from known code easier,
 // for all that's worth
+
+func getBuildConstraints() map[string]map[string]bool {
+	out := make(map[string]map[string]bool)
+
+	for _, architecture := range []string{
+		"darwin-386",
+		"darwin-386-cgo",
+		"darwin-amd64",
+		"darwin-amd64-cgo",
+		"darwin-arm64",
+		"darwin-arm64-cgo",
+		"freebsd-386",
+		"freebsd-386-cgo",
+		"freebsd-amd64",
+		"freebsd-amd64-cgo",
+		"freebsd-arm",
+		"freebsd-arm-cgo",
+		"freebsd-arm64",
+		"freebsd-arm64-cgo",
+		"freebsd-riscv64",
+		"freebsd-riscv64-cgo",
+		"linux-386",
+		"linux-386-cgo",
+		"linux-amd64",
+		"linux-amd64-cgo",
+		"linux-arm",
+		"linux-arm-cgo",
+		"netbsd-386",
+		"netbsd-386-cgo",
+		"netbsd-amd64",
+		"netbsd-amd64-cgo",
+		"netbsd-arm",
+		"netbsd-arm-cgo",
+		"netbsd-arm64",
+		"netbsd-arm64-cgo",
+		"openbsd-386",
+		"openbsd-386-cgo",
+		"openbsd-amd64",
+		"openbsd-amd64-cgo",
+		"windows-386",
+		"windows-amd64",
+	} {
+		archMap := make(map[string]bool)
+		for _, tag := range strings.Split(architecture, "-") {
+			archMap[tag] = true
+		}
+		out[architecture] = archMap
+	}
+
+	return out
+}
+
+var buildConstraints = getBuildConstraints()
 
 func check(err error) {
 	if err != nil {
@@ -363,6 +418,155 @@ func parseType(fset *token.FileSet, symMap symbolNameMap, line string) (string, 
 	typeReal, success := typeToString(pkgName, pkgArch, fset, symMap, typespec.Type)
 
 	return pkgArch, typeIdent, typeReal, success
+}
+
+var filteredNames = map[string]bool{
+	"testdata": true,
+	"vendor":   true,
+	"internal": true,
+	"arena":    true,
+	"cmd":      true,
+}
+
+func walkTreeDirs(ch chan<- string, root string) {
+	var dirNames []string
+
+	for _, dir := range check1(os.ReadDir(root)) {
+		if dir.IsDir() {
+			dirName := dir.Name()
+			if !filteredNames[dirName] {
+				dirNames = append(dirNames, filepath.Join(root, dir.Name()))
+			}
+		}
+	}
+
+	sort.Strings(dirNames)
+
+	for _, path := range dirNames {
+		ch <- path
+		walkTreeDirs(ch, path)
+	}
+}
+
+// copy-pasted from github.com/golang/go src/go/build/syslist.go
+var knownOS = map[string]bool{
+	"aix":       true,
+	"android":   true,
+	"darwin":    true,
+	"dragonfly": true,
+	"freebsd":   true,
+	"hurd":      true,
+	"illumos":   true,
+	"ios":       true,
+	"js":        true,
+	"linux":     true,
+	"nacl":      true,
+	"netbsd":    true,
+	"openbsd":   true,
+	"plan9":     true,
+	"solaris":   true,
+	"windows":   true,
+	"zos":       true,
+}
+
+var knownArch = map[string]bool{
+	"386":         true,
+	"amd64":       true,
+	"amd64p32":    true,
+	"arm":         true,
+	"armbe":       true,
+	"arm64":       true,
+	"arm64be":     true,
+	"loong64":     true,
+	"mips":        true,
+	"mipsle":      true,
+	"mips64":      true,
+	"mips64le":    true,
+	"mips64p32":   true,
+	"mips64p32le": true,
+	"ppc":         true,
+	"ppc64":       true,
+	"ppc64le":     true,
+	"riscv":       true,
+	"riscv64":     true,
+	"s390":        true,
+	"s390x":       true,
+	"sparc":       true,
+	"sparc64":     true,
+	"wasm":        true,
+}
+
+func getFilenameBuildTags(filePath string) (goos, goarch string) {
+	fileName := filepath.Base(filePath)
+	fileName = fileName[:len(fileName)-3]             // remove .go
+	potentialTags := strings.Split(fileName, "_")[1:] // drop anything before first _
+	if len(potentialTags) == 0 {
+		return
+	}
+
+	// get last two _-seperated elements
+	if tagsStart := len(potentialTags) - 2; tagsStart > 0 {
+		potentialTags = potentialTags[tagsStart:]
+	}
+
+	//*_GOOS
+	//*_GOARCH
+	//*_GOOS_GOARCH
+
+	last := potentialTags[len(potentialTags)-1]
+	if knownOS[last] {
+		goos = last
+		return
+	}
+	if knownArch[last] {
+		goarch = last
+	}
+	if len(potentialTags) == 2 {
+		first := potentialTags[0]
+		if knownOS[first] {
+			goos = first
+		}
+	}
+
+	return
+}
+
+func walkPrint(ch <-chan string) {
+	fset := token.NewFileSet()
+	for path := range ch {
+		x, err := parser.ParseDir(fset, path, nil, parser.PackageClauseOnly|parser.ParseComments)
+		//fmt.Printf("%q %#v\n%#v\n", path, x, err)
+		fmt.Println(path)
+
+		if err != nil {
+			continue
+		}
+		for _, pkg := range x {
+			if strings.HasSuffix(pkg.Name, "_test") || pkg.Name == "main" {
+				continue
+			}
+			fmt.Printf("	%s\n", pkg.Name)
+			for filePath, fileObj := range pkg.Files {
+				if !strings.HasSuffix(filePath, "_test.go") {
+					fmt.Printf("		%s\n", filePath)
+				}
+				if true {
+					ast.Print(fset, fileObj)
+				}
+			}
+		}
+	}
+}
+
+func main1() {
+	//outPath := check1(filepath.Abs("out.json"))
+	check(os.Chdir(os.Args[1]))
+
+	ch := make(chan string)
+
+	go walkPrint(ch)
+	walkTreeDirs(ch, ".")
+	close(ch)
 }
 
 func main() {
