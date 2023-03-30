@@ -1,17 +1,17 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"go/ast"
 	"go/build/constraint"
 	"go/parser"
 	"go/token"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"golang.org/x/tools/go/packages"
 )
 
 // TODO would just parsing the Go source code directly be better...?
@@ -23,8 +23,8 @@ func getBuildConstraints() map[string]map[string]bool {
 	out := make(map[string]map[string]bool)
 
 	for _, architecture := range []string{
-		"darwin-386",
-		"darwin-386-cgo",
+		//"darwin-386",
+		//"darwin-386-cgo",
 		"darwin-amd64",
 		"darwin-amd64-cgo",
 		"darwin-arm64",
@@ -162,30 +162,6 @@ var knownArch = map[string]bool{
 // https://groups.google.com/g/golang-nuts/c/tJSUNwyayis
 // drop everything below and just move to go/types? what about build constraints?
 
-func getImporter(fset *token.FileSet, filter func(fs.FileInfo) bool) ast.Importer {
-	return func(imports map[string]*ast.Object, path string) (pkg *ast.Object, err error) {
-		if oldPkg, ok := imports[path]; ok {
-			return oldPkg, nil
-		}
-
-		pathBase := filepath.Base(path)
-
-		pkgMap := check1(parser.ParseDir(fset, path, filter, parser.AllErrors))
-		for pkgName, pkg := range pkgMap {
-			if pkgName == pathBase {
-				obj := &ast.Object{
-					Kind: ast.Pkg,
-					Name: pkgName,
-					Data: pkg.Scope,
-				}
-				imports[path] = obj
-				return obj, nil
-			}
-		}
-		return nil, errors.New("failed import")
-	}
-}
-
 func getFilenameBuildTags(filePath string) (goos, goarch string) {
 	fileName := filepath.Base(filePath)
 	fileName = fileName[:len(fileName)-3]             // remove .go
@@ -251,12 +227,54 @@ tagsLoop:
 }
 
 type pkgFset struct {
-	pkg  *ast.Package
+	pkg  *packages.Package
 	fset *token.FileSet
 }
 
+// parse os-arch[-cgo]
+func getEnv(arch string) []string {
+	out := os.Environ()
+	if arch == "all" {
+		return out
+	}
+	split := strings.Split(arch, "-")
+	out = append(out, fmt.Sprintf("GOOS=%s", split[0]))
+	out = append(out, fmt.Sprintf("GOARCH=%s", split[1]))
+	if len(split) == 2 { // no cgo
+		out = append(out, "CGO_ENABLED=0")
+	}
+
+	return out
+}
+
 func filterPkg(pkg *ast.Package, path string) map[string]pkgFset {
+	// map<architectureString, map<filePath, astFile>>
 	archFiles := make(map[string]map[string]*ast.File)
+
+	/*
+		conf := types.Config{
+			//Importer: importer.Default(),
+			//Importer: importer.ForCompiler(token.NewFileSet(), "source", nil),
+			//Goversion: "go1.20",
+			IgnoreFuncBodies: true,
+			//FakeImportC: true,
+		}
+	*/
+	conf := packages.Config{
+		// probably only need these (TODO check)
+		Mode: packages.NeedTypes | packages.NeedDeps | packages.NeedImports,
+		/*
+			Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
+				packages.NeedImports | packages.NeedDeps | packages.NeedExportFile |
+				packages.NeedTypes | packages.NeedSyntax | packages.NeedTypesInfo |
+				packages.NeedTypesSizes | packages.NeedModule |
+				packages.NeedEmbedFiles | packages.NeedEmbedPatterns,
+		*/
+		Dir: os.Args[1],
+		// use ParseFile to discard function bodies?
+		// parallel parsing of separate packages in pipeline?
+		//ParseFile: nil,
+	}
 
 	for arch := range buildConstraints {
 		archFiles[arch] = make(map[string]*ast.File)
@@ -276,8 +294,8 @@ func filterPkg(pkg *ast.Package, path string) map[string]pkgFset {
 		}
 
 		// identify which tag sets set in buildConstraints match
-		for arch, constraints := range buildConstraints {
-			if expr.Eval(func(tag string) bool { return constraints[tag] }) {
+		for arch, tags := range buildConstraints {
+			if expr.Eval(func(tag string) bool { return tags[tag] }) {
 				archFiles[arch][filePath] = fileObj
 			}
 		}
@@ -286,26 +304,41 @@ func filterPkg(pkg *ast.Package, path string) map[string]pkgFset {
 	out := make(map[string]pkgFset)
 
 	for arch, fileMap := range archFiles {
+		// nothing for this arch, skip
 		if len(fileMap) == 0 {
 			continue
 		}
 
-		if arch != "all" {
-			for filePath, fileObj := range archFiles["all"] {
-				fileMap[filePath] = fileObj
+		/*
+			if arch != "all" {
+				for filePath, fileObj := range archFiles["all"] {
+					fileMap[filePath] = fileObj
+				}
+			}
+		*/
+
+		fset := token.NewFileSet()
+		conf.Env = getEnv(arch)
+		//conf.Importer = importer.ForCompiler(fset, "source", nil)
+		//conf.Sizes = types.SizesFor("gc", arch)
+
+		filteredFiles := make([]*ast.File, len(fileMap))
+		{
+			var i int
+			for filePath := range fileMap {
+				filteredFiles[i] = check1(parser.ParseFile(fset, filePath, nil, parser.AllErrors))
+				i++
 			}
 		}
 
-		fset := token.NewFileSet()
-		importer := getImporter(fset, nil)
-
-		newFileMap := make(map[string]*ast.File)
-		for filePath := range fileMap {
-			newFileMap[filePath] = check1(parser.ParseFile(fset, filePath, nil, parser.AllErrors))
+		//newPkg := check1(ast.NewPackage(fset, newFileMap, importer, &ast.Scope{}))
+		//newPkg := check1(conf.Check(path, fset, filteredFiles, nil))
+		newPkg := check1(packages.Load(&conf, path))
+		if len(newPkg) != 1 {
+			panic(len(newPkg))
 		}
-		newPkg := check1(ast.NewPackage(fset, newFileMap, importer, &ast.Scope{}))
 
-		out[arch] = pkgFset{pkg: newPkg, fset: fset}
+		out[arch] = pkgFset{pkg: newPkg[0], fset: fset}
 	}
 
 	return out
@@ -317,20 +350,19 @@ func walkPrint(ch <-chan string) {
 		x := check1(parser.ParseDir(fset, path, nil, parser.PackageClauseOnly|parser.ParseComments))
 		fmt.Println(path)
 
-		for pkgName, pkg := range x {
-			if strings.HasSuffix(pkg.Name, "_test") || pkg.Name == "main" {
+		for _, pkg := range x {
+			if strings.HasSuffix(pkg.Name, "_test") || pkg.Name == "main" || pkg.Name == "builtin" {
 				continue
 			}
 			fmt.Printf("	%s\n", pkg.Name)
 
 			//ast.Print(fset, pkg)
 
-			if pkgName == "tar" {
+			if path == "encoding/base64" || true {
 				fileMap := filterPkg(pkg, path)
 				for arch, ffset := range fileMap {
 					fmt.Printf("		%s\n", arch)
-					_ = ffset
-					ast.Print(ffset.fset, ffset.pkg)
+					fmt.Printf("%#v\n", ffset.pkg.Types.Scope().Names())
 				}
 			}
 		}
