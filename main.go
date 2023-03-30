@@ -6,6 +6,7 @@ import (
 	"go/build/constraint"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"os"
 	"path/filepath"
 	"sort"
@@ -226,11 +227,6 @@ tagsLoop:
 	return expr
 }
 
-type pkgFset struct {
-	pkg  *packages.Package
-	fset *token.FileSet
-}
-
 // parse os-arch[-cgo]
 func getEnv(arch string) []string {
 	out := os.Environ()
@@ -247,9 +243,9 @@ func getEnv(arch string) []string {
 	return out
 }
 
-func filterPkg(pkg *ast.Package, path string) map[string]pkgFset {
+func filterPkg(pkg *ast.Package, path string) map[string]*packages.Package {
 	// map<architectureString, map<filePath, astFile>>
-	archFiles := make(map[string]map[string]*ast.File)
+	archMatches := map[string]bool{"all": true}
 
 	/*
 		conf := types.Config{
@@ -273,13 +269,7 @@ func filterPkg(pkg *ast.Package, path string) map[string]pkgFset {
 		Dir: os.Args[1],
 		// use ParseFile to discard function bodies?
 		// parallel parsing of separate packages in pipeline?
-		//ParseFile: nil,
 	}
-
-	for arch := range buildConstraints {
-		archFiles[arch] = make(map[string]*ast.File)
-	}
-	archFiles["all"] = make(map[string]*ast.File)
 
 	for filePath, fileObj := range pkg.Files {
 		if strings.HasSuffix(filePath, "_test.go") {
@@ -289,56 +279,39 @@ func filterPkg(pkg *ast.Package, path string) map[string]pkgFset {
 		expr := getTags(filePath, fileObj)
 		// no build constraints
 		if expr == nil {
-			archFiles["all"][filePath] = fileObj
 			continue
 		}
 
 		// identify which tag sets set in buildConstraints match
 		for arch, tags := range buildConstraints {
 			if expr.Eval(func(tag string) bool { return tags[tag] }) {
-				archFiles[arch][filePath] = fileObj
+				archMatches[arch] = true
 			}
+		}
+
+		// non-"all" files exist + every arch is matched by at least one file,
+		// nothing more to be learned here
+		if len(archMatches) == len(buildConstraints)+1 {
+			break
 		}
 	}
 
-	out := make(map[string]pkgFset)
+	// arch-specific stuff crops up at least once, "all" would just be a duplicate here
+	if len(archMatches) > 1 {
+		delete(archMatches, "all")
+	}
 
-	for arch, fileMap := range archFiles {
-		// nothing for this arch, skip
-		if len(fileMap) == 0 {
-			continue
-		}
+	out := make(map[string]*packages.Package)
 
-		/*
-			if arch != "all" {
-				for filePath, fileObj := range archFiles["all"] {
-					fileMap[filePath] = fileObj
-				}
-			}
-		*/
-
-		fset := token.NewFileSet()
+	for arch := range archMatches {
 		conf.Env = getEnv(arch)
-		//conf.Importer = importer.ForCompiler(fset, "source", nil)
-		//conf.Sizes = types.SizesFor("gc", arch)
 
-		filteredFiles := make([]*ast.File, len(fileMap))
-		{
-			var i int
-			for filePath := range fileMap {
-				filteredFiles[i] = check1(parser.ParseFile(fset, filePath, nil, parser.AllErrors))
-				i++
-			}
-		}
-
-		//newPkg := check1(ast.NewPackage(fset, newFileMap, importer, &ast.Scope{}))
-		//newPkg := check1(conf.Check(path, fset, filteredFiles, nil))
 		newPkg := check1(packages.Load(&conf, path))
 		if len(newPkg) != 1 {
 			panic(len(newPkg))
 		}
 
-		out[arch] = pkgFset{pkg: newPkg[0], fset: fset}
+		out[arch] = newPkg[0]
 	}
 
 	return out
@@ -348,21 +321,62 @@ func walkPrint(ch <-chan string) {
 	fset := token.NewFileSet()
 	for path := range ch {
 		x := check1(parser.ParseDir(fset, path, nil, parser.PackageClauseOnly|parser.ParseComments))
-		fmt.Println(path)
 
 		for _, pkg := range x {
 			if strings.HasSuffix(pkg.Name, "_test") || pkg.Name == "main" || pkg.Name == "builtin" {
 				continue
 			}
-			fmt.Printf("	%s\n", pkg.Name)
 
 			//ast.Print(fset, pkg)
 
-			if path == "encoding/base64" || true {
+			if path == "image/gif" {
 				fileMap := filterPkg(pkg, path)
-				for arch, ffset := range fileMap {
-					fmt.Printf("		%s\n", arch)
-					fmt.Printf("%#v\n", ffset.pkg.Types.Scope().Names())
+				for _, pkg := range fileMap {
+					//fmt.Printf("		%s\n", arch)
+					scope := pkg.Types.Scope()
+					names := scope.Names()
+					//fmt.Printf("%#v\n", names)
+					for _, name := range names {
+						obj := scope.Lookup(name)
+
+						fmt.Printf("%s.%s: ", obj.Pkg().Path(), obj.Name())
+
+						baseType := obj.Type()
+
+						switch t := baseType.Underlying().(type) {
+						case *types.Basic:
+							fmt.Printf("basic %s\n", t)
+						case *types.Struct:
+							fmt.Printf("struct %s\n", t)
+						case *types.Signature:
+							fmt.Printf("%s.%s: ", obj.Pkg().Path(), obj.Name())
+							fmt.Printf("func %s\n", t)
+						case *types.Pointer:
+							fmt.Printf("ptr %s\n", t)
+						case *types.Interface:
+							fmt.Printf("iface %s\n", t)
+						case *types.Map:
+							fmt.Printf("map %s\n", t)
+						case *types.Array:
+							fmt.Printf("arr %s\n", t)
+						case *types.Slice:
+							fmt.Printf("slice %s\n", t)
+						case *types.Chan:
+							fmt.Printf("chan %s\n", t)
+						default:
+							panic(t)
+						}
+
+						//methods := types.NewMethodSet(baseType)
+						methods := types.NewMethodSet(types.NewPointer(baseType))
+						numMethods := methods.Len()
+						for i := 0; i < numMethods; i++ {
+							fmt.Printf("method %d: %s\n", i, methods.At(i))
+						}
+						if numMethods > 0 {
+							fmt.Println()
+						}
+					}
 				}
 			}
 		}
