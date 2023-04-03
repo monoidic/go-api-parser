@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/build/constraint"
@@ -17,7 +18,7 @@ import (
 )
 
 /* TODO parse:
- * type aliases (add to Aliases map) (TODO need separate methods for these? prolly not)
+ * type aliases (add to Aliases map, no methods)
  * types w/ non-struct underlying type (add to Types map w/ underlying type)
  * types w/ struct underlying type (add to Structs map)
  * interfaces (???)
@@ -262,7 +263,6 @@ func parseDiscardFuncBody(fset *token.FileSet, filename string, src []byte) (*as
 }
 
 func filterPkg(pkg *ast.Package, path string) map[string]*packages.Package {
-	// map<architectureString, map<filePath, astFile>>
 	archMatches := map[string]bool{"all": true}
 
 	conf := packages.Config{
@@ -424,6 +424,7 @@ func mapAnd[V equalsI](x, y map[string]V) map[string]V {
 // get pkgData with definitions existing in both x and y
 func (x pkgData) and(y pkgData) pkgData {
 	return pkgData{
+		pkg:     x.pkg,
 		Funcs:   mapAnd(x.Funcs, y.Funcs),
 		Types:   mapAnd(x.Types, y.Types),
 		Structs: mapAnd(x.Structs, y.Structs),
@@ -441,8 +442,9 @@ func parseFunc(obj *types.Func, pkg pkgData) {
 }
 
 func parseType(obj *types.TypeName, pkg pkgData) {
+	// TODO pkg.Types key wrong for image/draw
 	if obj.IsAlias() {
-		pkg.Aliases[obj.Id()] = alias{Target: obj.Type().String()}
+		pkg.Aliases[getTypeName(obj.Type())] = alias{Target: getTypeName(obj.Type())}
 		return
 	}
 	named := obj.Type().(*types.Named)
@@ -450,30 +452,134 @@ func parseType(obj *types.TypeName, pkg pkgData) {
 	if named.TypeParams() != nil {
 		return
 	}
-	if t, ok := named.Underlying().(*types.Struct); ok {
+
+	isInterface := false
+
+	switch t := named.Underlying().(type) {
+	case *types.Struct:
 		parseStruct(obj.Id(), t, pkg)
+	case *types.Interface:
+		isInterface = true
+	case *types.Basic:
+		pkg.Types[getTypeName(obj.Type())] = typeData{Underlying: getTypeName(t)}
+	case *types.Array, *types.Slice, *types.Signature:
+		// nothing
+	default:
+		_ = named.Underlying().(*types.Basic)
+		panic(named.Underlying())
 	}
 
-	if false {
+	if !isInterface {
 		parseMethods(obj, pkg)
 	}
 }
 
 // false if method comes from embedded struct field
 func selfMethod(objT types.Type, f *types.Func) bool {
-	fmt.Println(f)
-	fmt.Println(f.Scope())
-	scope := f.Scope()
-	names := scope.Names()
-	if len(names) != 1 {
-		panic(objT)
-	}
-	realT := scope.Lookup(names[0]).(*types.Var).Type()
+	recvT := f.Type().(*types.Signature).Recv().Type()
 
-	return objT == realT
+	// pointers may not equal-compare true; if only one of the two is a pointer, they don't match,
+	// if both are pointers, repeatedly deref both to get the base type
+	for {
+		objPtr, objIsPtr := objT.Underlying().(*types.Pointer)
+		recvPtr, recvIsPtr := recvT.Underlying().(*types.Pointer)
+		if objIsPtr != recvIsPtr {
+			return false
+		}
+
+		if !objIsPtr {
+			break
+		}
+
+		objT = objPtr.Elem()
+		recvT = recvPtr.Elem()
+	}
+
+	return recvT == objT
 }
 
-func parseMethods(obj *types.TypeName, pgk pkgData) {
+func parseMethod(method types.Object, pkg pkgData) {
+	// name format (not returned by f.Id() ):
+	// value receiver: {pkg}.{receiver_type}.{method_name}, e.g main.base.xyzzy
+	// pointer receiver: {pkg}.(*{receiver_type}).{method_name}, e.g main.(*base).xyzzy
+
+	signature := method.Type().(*types.Signature)
+	recvT := signature.Recv().Type()
+
+	var recvName string
+
+	if t, ok := recvT.Underlying().(*types.Pointer); ok {
+		recvName = fmt.Sprintf("(*%s)", t.Elem().(*types.Named).Obj().Name())
+	} else {
+		recvName = recvT.(*types.Named).Obj().Name()
+	}
+
+	name := fmt.Sprintf("%s.%s.%s", method.Pkg().Path(), recvName, method.Name())
+	// TODO
+
+	baseParams := tupToSlice(signature.Params())
+	realParams := make([]namedType, 1, len(baseParams)+1)
+	realParams[0] = namedType{
+		Name:     "self",
+		DataType: getTypeName(recvT),
+	}
+	realParams = append(realParams, baseParams...)
+
+	pkg.Funcs[name] = funcData{
+		Params:  realParams,
+		Results: tupToSlice(signature.Results()),
+	}
+}
+
+func tupToSlice(tup *types.Tuple) []namedType {
+	tupLen := tup.Len()
+	out := make([]namedType, tupLen)
+	for i := 0; i < tupLen; i++ {
+		param := tup.At(i)
+
+		out[i] = namedType{
+			Name:     param.Name(),
+			DataType: getTypeName(param.Type()),
+		}
+	}
+
+	return out
+}
+
+func getTypeName(iface types.Type) string {
+	//fmt.Println(iface)
+	switch dt := iface.(type) {
+	case *types.Named:
+		// incorrect if the type is declared in an external package
+		//return dt.Obj().Id()
+		obj := dt.Obj()
+		if pkg := obj.Pkg(); pkg == nil { // universe scope
+			return obj.Name()
+		} else {
+			return fmt.Sprintf("%s.%s", obj.Pkg().Name(), obj.Name())
+		}
+	case *types.Basic:
+		return dt.String()
+	case *types.Pointer:
+		return getTypeName(dt.Elem()) + "*"
+	case *types.Slice:
+		return getTypeName(dt.Elem()) + "[]"
+	case *types.Map:
+		return "map"
+	case *types.Interface:
+		return "iface"
+	case *types.Signature:
+		return "code*"
+	default:
+		_ = dt.(*types.Named)
+		panic("unreachable")
+	}
+}
+
+func parseMethods(obj *types.TypeName, pkg pkgData) {
+	// name format (not returned by f.Id() ):
+	// value receiver: {pkg}.{receiver_type}.{method_name}, e.g main.base.xyzzy
+	// pointer receiver: {pkg}.(*{receiver_type}).{method_name}, e.g main.(*base).xyzzy
 	objT := obj.Type()
 	methods := types.NewMethodSet(objT)
 	numMethods := methods.Len()
@@ -486,7 +592,7 @@ func parseMethods(obj *types.TypeName, pgk pkgData) {
 			continue // comes from embedded field
 		}
 		// TODO
-		fmt.Printf("regular method %s\n", method.Name())
+		parseMethod(method, pkg)
 	}
 
 	pObjT := types.NewPointer(objT)
@@ -499,35 +605,7 @@ func parseMethods(obj *types.TypeName, pgk pkgData) {
 			continue // already handled or from embedded field
 		}
 		// TODO
-		fmt.Printf("pointer method %s\n", method.Name())
-	}
-
-	// TODO
-	if types.NewMethodSet(obj.Type()).Len() != types.NewMethodSet(types.NewPointer(obj.Type())).Len() {
-		fmt.Println(types.NewMethodSet(obj.Type()))
-		fmt.Println(types.NewMethodSet(types.NewPointer(obj.Type())))
-
-		idkF := types.NewMethodSet(obj.Type()).At(0)
-		//idkF := types.NewMethodSet(types.NewPointer(obj.Type())).At(0)
-		idkF2 := idkF.Obj().(*types.Func)
-		scope := idkF2.Scope()
-		names := scope.Names()
-		if len(names) != 1 {
-			panic(scope)
-		}
-		preT := scope.Lookup(names[0]).(*types.Var).Type()
-		var realT types.Type
-		if ptrT, ok := preT.(*types.Pointer); ok {
-			realT = ptrT.Elem()
-		} else {
-			realT = preT
-		}
-		fmt.Println(objT.String()) // os.file
-		fmt.Println(realT)         // os.File
-		fmt.Println(objT == realT)
-		fmt.Println(idkF.Obj().Name()) // close
-
-		panic(obj)
+		parseMethod(method, pkg)
 	}
 }
 
@@ -538,11 +616,10 @@ func parseStruct(name string, obj *types.Struct, pkg pkgData) {
 		field := obj.Field(i)
 		fields[i] = namedType{
 			Name:     field.Name(),
-			DataType: field.Type().String(),
+			DataType: getTypeName(field.Type()),
 		}
 	}
 	pkg.Structs[name] = structDef{Fields: fields}
-	fmt.Println(name, fields)
 }
 
 func walkPrint(ch <-chan string) {
@@ -557,7 +634,9 @@ func walkPrint(ch <-chan string) {
 
 			//ast.Print(fset, astPkg)
 
-			if path == "os" {
+			//if path == "os" {
+			if path == "image/draw" {
+				//if true {
 				pkgMap := filterPkg(astPkg, path)
 				var andedPkg pkgData
 				andedFirst := true
@@ -571,74 +650,20 @@ func walkPrint(ch <-chan string) {
 					for _, name := range names {
 						switch obj := scope.Lookup(name).(type) {
 						case *types.Func:
-							fmt.Println(obj)
 							parseFunc(obj, pkgD)
 						case *types.TypeName:
-							fmt.Println(obj)
 							parseType(obj, pkgD)
 						}
-						continue
-
-						obj := scope.Lookup("a")
-
-						fmt.Printf("%s\n", obj)
-						//fmt.Printf("%s.%s: ", obj.Pkg().Path(), obj.Name())
-						fmt.Println(types.Id(obj.Pkg(), obj.Name()))
-
-						baseType := obj.Type()
-
-						//switch t := baseType.Underlying().(type) {
-						switch t := baseType.(type) {
-						case *types.Basic:
-							fmt.Printf("basic %s\n", t)
-						case *types.Struct:
-							fmt.Printf("struct %s\n", t)
-						case *types.Signature:
-							fmt.Printf("%s: func %s\n", obj.Id(), t)
-						case *types.Pointer:
-							fmt.Printf("ptr %s\n", t)
-						case *types.Interface:
-							fmt.Printf("iface %s\n", t)
-						case *types.Map:
-							fmt.Printf("map %s\n", t)
-						case *types.Array:
-							fmt.Printf("arr %s\n", t)
-						case *types.Slice:
-							fmt.Printf("slice %s\n", t)
-						case *types.Chan:
-							fmt.Printf("chan %s\n", t)
-						case *types.Named:
-							fmt.Printf("named %s\n", t)
-						default:
-							panic(t)
-						}
-
-						//methods := types.NewMethodSet(baseType)
-						methods := types.NewMethodSet(types.NewPointer(baseType))
-						numMethods := methods.Len()
-						for i := 0; i < numMethods; i++ {
-							fmt.Printf("method %d: %s\n", i, methods.At(i))
-						}
-						if numMethods > 0 {
-							fmt.Println()
-						}
-
-						methods = types.NewMethodSet(baseType)
-						numMethods = methods.Len()
-						for i := 0; i < numMethods; i++ {
-							fmt.Printf("method %d: %s\n", i, methods.At(i))
-						}
-						if numMethods > 0 {
-							fmt.Println()
-						}
 					}
-					if andedFirst {
+
+					if !andedFirst {
+						andedPkg = andedPkg.and(pkgD)
+					} else {
 						andedPkg = pkgD
 						andedFirst = false
-					} else {
-						andedPkg = andedPkg.and(pkgD)
 					}
 				}
+				fmt.Println(string(check1(json.Marshal(andedPkg))))
 			}
 		}
 	}
