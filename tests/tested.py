@@ -1,8 +1,7 @@
 from itertools import chain
 
 import data
-
-from mocked_ghidra import MockGhidraRegister, VariableStorage, ParameterImpl
+from mocked_ghidra import MockGhidraRegister, VariableStorage, ParameterImpl, AbstractFloatDataType
 
 # start of setup
 ptr = data.Pointer64DataType
@@ -119,19 +118,25 @@ currentProgram = None  # noqa:N816
 # (for handling composite types like structs) into registers
 # if all given types do not fit into registers, returns None,
 # otherwise returns a list of the used registers for the given datatype
+
+
 def assign_registers(int_registers, float_registers, types):
     # clone + reverse for .pop() and .append()
     int_registers = int_registers[::-1]
     float_registers = float_registers[::-1]
     out = []
 
-    for t in types:
+    for t in sorted(types, key=lambda x: x.getLength(), reverse=True):
         t_len = t.getLength()
         while t_len:  # allocate parts of
-            if False:
+            if isinstance(t, data.AbstractFloatDataType):
                 registers = float_registers
             else:
                 registers = int_registers
+
+            # prioritize registers based on their size
+            registers = sorted(
+                registers, key=lambda x: x.getBitLength(), reverse=True)
 
             if len(registers) == 0:
                 return None
@@ -169,7 +174,8 @@ def get_params(param_types):
 
         types = recursive_struct_unpack(datatype)
 
-        assigned = assign_registers(remaining_int_registers, remaining_float_registers, types)
+        assigned = assign_registers(
+            remaining_int_registers, remaining_float_registers, types)
         if assigned is None:
             return None
 
@@ -177,7 +183,8 @@ def get_params(param_types):
         # when fixing, ensure child registers work too, e.g XMM0's child register XMM0Q or RAX's child EAX
         #
         #  count number of integer and float registers used by the assignment and remove from available registers
-        float_reg_num = sum(1 for reg in assigned if reg.getTypeFlags() & reg.TYPE_VECTOR)
+        float_reg_num = sum(
+            1 for reg in assigned if reg.getTypeFlags() & reg.TYPE_VECTOR)
         int_reg_num = len(assigned) - float_reg_num
 
         remaining_int_registers = remaining_int_registers[int_reg_num:]
@@ -196,6 +203,8 @@ def get_params(param_types):
 
 # same as get_params, but for return values; as only a single return value is handled by Ghidra,
 # returns a dynamically generated struct type with similar storage characteristics
+
+
 def get_results(result_types):
     # TODO structs currently unhandled
     if 'struct' in result_types:
@@ -216,7 +225,8 @@ def get_results(result_types):
         datatype = get_dynamic_type(result_types)
 
     types = recursive_struct_unpack(datatype)
-    assigned = assign_registers(remaining_int_registers, remaining_float_registers, types)
+    assigned = assign_registers(
+        remaining_int_registers, remaining_float_registers, types)
     if assigned is None:
         return None
 

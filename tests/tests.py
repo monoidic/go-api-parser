@@ -5,6 +5,7 @@ import unittest
 import data
 from mocked_ghidra import MockGhidraRegister, VariableStorage, ParameterImpl
 
+
 from tested import get_results, get_params, registers, go_chan, go_map, go_string
 
 
