@@ -25,6 +25,8 @@ import (
  * methods (parse while parsing structs, add to Funcs map w/ proper name and receiver as arg;
 	        ignore interface methods + methods inherited from embedded fields)
  * functions (add to Funcs map)
+
+ * struct with embedded anonymous struct
 */
 
 func getBuildConstraints() map[string]map[string]bool {
@@ -547,7 +549,6 @@ func tupToSlice(tup *types.Tuple) []namedType {
 }
 
 func getTypeName(iface types.Type) string {
-	//fmt.Println(iface)
 	switch dt := iface.(type) {
 	case *types.Named:
 		// incorrect if the type is declared in an external package
@@ -556,7 +557,7 @@ func getTypeName(iface types.Type) string {
 		if pkg := obj.Pkg(); pkg == nil { // universe scope
 			return obj.Name()
 		} else {
-			return fmt.Sprintf("%s.%s", obj.Pkg().Name(), obj.Name())
+			return fmt.Sprintf("%s.%s", obj.Pkg().Path(), obj.Name())
 		}
 	case *types.Basic:
 		return dt.String()
@@ -564,12 +565,24 @@ func getTypeName(iface types.Type) string {
 		return getTypeName(dt.Elem()) + "*"
 	case *types.Slice:
 		return getTypeName(dt.Elem()) + "[]"
+	case *types.Array:
+		return fmt.Sprintf("%s[%d]", getTypeName(dt.Elem()), dt.Len())
 	case *types.Map:
 		return "map"
 	case *types.Interface:
 		return "iface"
 	case *types.Signature:
 		return "code*"
+	case *types.Chan:
+		return "chan"
+	case *types.Struct:
+		if dt.NumFields() == 0 {
+			return "struct{}"
+		}
+		fmt.Println(iface)
+		panic(1)
+//		obj := dt.Obj()
+//		return fmt.Sprintf("%s.%s", obj.Pkg().Path(), obj.Name())
 	default:
 		_ = dt.(*types.Named)
 		panic("unreachable")
@@ -614,6 +627,7 @@ func parseStruct(name string, obj *types.Struct, pkg pkgData) {
 	fields := make([]namedType, numFields)
 	for i := 0; i < numFields; i++ {
 		field := obj.Field(i)
+		fmt.Println(name, field.Name())
 		fields[i] = namedType{
 			Name:     field.Name(),
 			DataType: getTypeName(field.Type()),
@@ -635,8 +649,8 @@ func walkPrint(ch <-chan string) {
 			//ast.Print(fset, astPkg)
 
 			//if path == "os" {
-			if path == "image/draw" {
-				//if true {
+			//if path == "image/draw" {
+			if true {
 				pkgMap := filterPkg(astPkg, path)
 				var andedPkg pkgData
 				andedFirst := true
