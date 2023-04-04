@@ -19,11 +19,11 @@ import (
 )
 
 /* TODO parse:
- * interfaces (???)
- * functions (add to Funcs map)
-
- * handle type aliased structs, e.g internal/fuzz.CorpusEntry, better
- */
+* e.g internal/syscall/unix.KernelVersion available on Windows...? filtering still broken
+* handle type aliased structs, e.g internal/fuzz.CorpusEntry, better,
+  instead of creating a bunch of anonymous struct definitions everywhere they appear
+  in function signatures or in structs
+*/
 
 // go tool dist list -json | jq -r '.[] | select(.FirstClass == true) | .GOOS + "-" + .GOARCH'
 var architectures = []string{
@@ -207,6 +207,36 @@ tagsLoop:
 	return expr
 }
 
+// from src/cmd/dist/build.go
+var unixOS = map[string]bool{
+	"aix":       true,
+	"android":   true,
+	"darwin":    true,
+	"dragonfly": true,
+	"freebsd":   true,
+	"hurd":      true,
+	"illumos":   true,
+	"ios":       true,
+	"linux":     true,
+	"netbsd":    true,
+	"openbsd":   true,
+	"solaris":   true,
+}
+
+func tagCheck(tag string, tags map[string]bool) bool {
+	if tag != "unix" {
+		return tags[tag]
+	}
+
+	// tags map is shorter than unixOS map
+	for tag := range tags {
+		if unixOS[tag] {
+			return true
+		}
+	}
+	return false
+}
+
 // parse os-arch[-cgo]
 func getEnv(arch string) []string {
 	out := os.Environ()
@@ -257,7 +287,7 @@ func filterPkg(pkg *ast.Package, path string) map[string]*packages.Package {
 
 		// identify which tag sets set in buildConstraints match
 		for arch, tags := range buildConstraints {
-			if expr.Eval(func(tag string) bool { return tags[tag] }) {
+			if expr.Eval(func(tag string) bool { return tagCheck(tag, tags) }) {
 				archMatches[arch] = true
 			}
 		}
@@ -265,13 +295,18 @@ func filterPkg(pkg *ast.Package, path string) map[string]*packages.Package {
 		// non-"all" files exist + every arch is matched by at least one file,
 		// nothing more to be learned here
 		if len(archMatches) == len(buildConstraints)+1 {
+			// arch-specific stuff crops up at least once, "all" would just be a duplicate here
+			delete(archMatches, "all")
 			break
 		}
 	}
 
-	// arch-specific stuff crops up at least once, "all" would just be a duplicate here
-	if archMatches["all"] && len(archMatches) > 1 {
+	// has something for all arches and some arch-specific things
+	if archMatches["all"] && len(archMatches) != 1 {
 		delete(archMatches, "all")
+		for arch := range buildConstraints {
+			archMatches[arch] = true
+		}
 	}
 
 	out := make(map[string]*packages.Package)
@@ -421,6 +456,13 @@ func parseFunc(obj *types.Func, pkg pkgData) {
 	if signature.TypeParams() != nil {
 		return
 	}
+
+	name := obj.FullName()
+
+	pkg.Funcs[name] = funcData{
+		Params:  tupToSlice(signature.Params(), name+"|param", pkg),
+		Results: tupToSlice(signature.Results(), name+"|result", pkg),
+	}
 }
 
 func parseType(obj *types.TypeName, pkg pkgData) {
@@ -509,7 +551,7 @@ func parseMethod(method types.Object, pkg pkgData) {
 
 	name := fmt.Sprintf("%s.%s.%s", method.Pkg().Path(), recvName, method.Name())
 
-	baseParams := tupToSlice(signature.Params(), name+".param", pkg)
+	baseParams := tupToSlice(signature.Params(), name+"|param", pkg)
 	realParams := make([]namedType, 1, len(baseParams)+1)
 	realParams[0] = namedType{
 		Name:     "self",
@@ -519,7 +561,7 @@ func parseMethod(method types.Object, pkg pkgData) {
 
 	pkg.Funcs[name] = funcData{
 		Params:  realParams,
-		Results: tupToSlice(signature.Results(), name+".result", pkg),
+		Results: tupToSlice(signature.Results(), name+"|result", pkg),
 	}
 }
 
@@ -626,17 +668,15 @@ func parseStruct(name string, obj *types.Struct, pkg pkgData) {
 // and remove said parts from other architectures
 func archSplit(pkgArchs map[string]pkgData) {
 	// only has "all" architecture, skip
-	_, hasAll := pkgArchs["all"]
-	if hasAll && len(pkgArchs) == 1 {
+	if _, hasAll := pkgArchs["all"]; hasAll {
+		if len(pkgArchs) != 1 {
+			panic(0)
+		}
 		return
 	}
 
 	// does not have at least one element on every arch (excluding "all"), skip
-	numArchs := len(pkgArchs)
-	if hasAll {
-		numArchs--
-	}
-	if numArchs == len(buildConstraints) {
+	if len(pkgArchs) != len(buildConstraints) {
 		return
 	}
 
@@ -668,13 +708,13 @@ func archSplit(pkgArchs map[string]pkgData) {
 
 	// add common parts back as "all" architecture
 	if !pkgAllArch.empty() {
-		pkgArchs["all"] = (pkgAllArch)
+		pkgArchs["all"] = pkgAllArch
 	}
 }
 
 func walkPrint(ch <-chan string, wg *sync.WaitGroup) {
 	fset := token.NewFileSet()
-	allPkgs := make(map[string]pkgData)
+	allPkgs := make(map[string]pkgData, len(buildConstraints)+1)
 	for arch := range buildConstraints {
 		allPkgs[arch] = newPkgData()
 	}
@@ -688,8 +728,6 @@ func walkPrint(ch <-chan string, wg *sync.WaitGroup) {
 				continue
 			}
 
-			//if path == "internal/syscall/windows" {
-			//if path == "internal/fuzz" {
 			if true {
 				pkgMap := filterPkg(astPkg, path)
 				pkgArchs := make(map[string]pkgData)
