@@ -668,7 +668,7 @@ func archSplit(pkgArchs map[string]pkgData) {
 
 	// add common parts back as "all" architecture
 	if !pkgAllArch.empty() {
-		pkgArchs["all"].merge(pkgAllArch)
+		pkgArchs["all"] = (pkgAllArch)
 	}
 }
 
