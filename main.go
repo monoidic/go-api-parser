@@ -11,7 +11,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"sort"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -19,22 +19,81 @@ import (
 )
 
 /* TODO parse:
-* e.g internal/syscall/unix.KernelVersion available on Windows...? filtering still broken
 * handle type aliased structs, e.g internal/fuzz.CorpusEntry, better,
   instead of creating a bunch of anonymous struct definitions everywhere they appear
   in function signatures or in structs
 */
 
-// go tool dist list -json | jq -r '.[] | select(.FirstClass == true) | .GOOS + "-" + .GOARCH'
+// go tool dist list -json | jq -r '.[] | "\u0022" + .GOOS + "-" + .GOARCH + "\u0022,"'
 var architectures = []string{
+	"aix-ppc64",
+	"android-386",
+	"android-amd64",
+	"android-arm",
+	"android-arm64",
 	"darwin-amd64",
 	"darwin-arm64",
+	"dragonfly-amd64",
+	"freebsd-386",
+	"freebsd-amd64",
+	"freebsd-arm",
+	"freebsd-arm64",
+	"freebsd-riscv64",
+	"illumos-amd64",
+	"ios-amd64",
+	"ios-arm64",
+	"js-wasm",
 	"linux-386",
 	"linux-amd64",
 	"linux-arm",
 	"linux-arm64",
+	"linux-loong64",
+	"linux-mips",
+	"linux-mips64",
+	"linux-mips64le",
+	"linux-mipsle",
+	"linux-ppc64",
+	"linux-ppc64le",
+	"linux-riscv64",
+	"linux-s390x",
+	"netbsd-386",
+	"netbsd-amd64",
+	"netbsd-arm",
+	"netbsd-arm64",
+	"openbsd-386",
+	"openbsd-amd64",
+	"openbsd-arm",
+	"openbsd-arm64",
+	"openbsd-mips64",
+	"plan9-386",
+	"plan9-amd64",
+	"plan9-arm",
+	"solaris-amd64",
 	"windows-386",
 	"windows-amd64",
+	"windows-arm",
+	"windows-arm64",
+}
+
+type dirStack struct {
+	l []string
+}
+
+func (s *dirStack) pushMultiple(l []string) {
+	// reverse sorted order, to pop in sorted order (not important)
+	// sort.Slice(l, func(i, j int) bool { return l[j] < l[i] })
+	s.l = append(s.l, l...)
+}
+
+func (s *dirStack) pop() (string, bool) {
+	size := len(s.l)
+	if size == 0 {
+		return "", false
+	}
+
+	dir := s.l[size-1]
+	s.l = s.l[:size-1]
+	return dir, true
 }
 
 func getBuildConstraints() map[string]map[string]bool {
@@ -74,24 +133,30 @@ var filteredDirs = map[string]bool{
 	".git":     true,
 }
 
-func walkTreeDirs(ch chan<- string, root string) {
-	ch <- root
+func dirwalk(ch chan<- string) {
 
-	var dirNames []string
+	st := dirStack{l: []string{"."}}
 
-	for _, dir := range check1(os.ReadDir(root)) {
-		if dir.IsDir() {
-			dirName := dir.Name()
+	for {
+		root, success := st.pop()
+		if !success {
+			return
+		}
+		ch <- root
+
+		var subdirs []string
+
+		for _, entry := range check1(os.ReadDir(root)) {
+			if !entry.IsDir() {
+				continue
+			}
+			dirName := entry.Name()
 			if !filteredDirs[dirName] {
-				dirNames = append(dirNames, filepath.Join(root, dir.Name()))
+				subdirs = append(subdirs, filepath.Join(root, dirName))
 			}
 		}
-	}
 
-	sort.Strings(dirNames)
-
-	for _, path := range dirNames {
-		walkTreeDirs(ch, path)
+		st.pushMultiple(subdirs)
 	}
 }
 
@@ -178,17 +243,20 @@ func getFilenameBuildTags(filePath string) (goos, goarch string) {
 	return
 }
 
-func getTags(filePath string, fileObj *ast.File) constraint.Expr {
-	var expr constraint.Expr
-tagsLoop:
-	for _, commentGroup := range fileObj.Comments {
+func commentTags(commentGroups []*ast.CommentGroup) constraint.Expr {
+	for _, commentGroup := range commentGroups {
 		for _, comment := range commentGroup.List {
 			if maybeExpr, err := constraint.Parse(comment.Text); err == nil {
-				expr = maybeExpr
-				break tagsLoop
+				return maybeExpr
 			}
 		}
 	}
+
+	return nil
+}
+
+func getTags(filePath string, fileObj *ast.File) constraint.Expr {
+	expr := commentTags(fileObj.Comments)
 
 	goos, goarch := getFilenameBuildTags(filePath)
 
@@ -494,8 +562,19 @@ func parseType(obj *types.TypeName, pkg pkgData) {
 	case *types.Basic:
 		pkg.Types[getTypeName(obj.Type(), "", pkg)] = typeData{Underlying: getTypeName(t, "", pkg)}
 	case *types.Pointer:
-		if structDef, ok := t.Elem().(*types.Struct); !(ok && structDef.NumFields() == 0) {
-			panic(t)
+		doPanic := false
+		switch elT := t.Elem().(type) {
+		case *types.Struct:
+			// *struct{}
+			doPanic = elT.NumFields() != 0
+		case *types.Basic:
+			// runtime/defs_aix_ppc64.go: type pthread_attr *byte
+			doPanic = !(elT.Kind() == types.Byte && named.Obj().Name() == "pthread_attr")
+		default:
+			doPanic = true
+		}
+		if doPanic {
+			panic(fmt.Sprintf("pkg %s, type %s", named.Obj().Pkg().Path(), named))
 		}
 	case *types.Array, *types.Slice, *types.Signature, *types.Map, *types.Chan:
 		// nothing
@@ -510,27 +589,10 @@ func parseType(obj *types.TypeName, pkg pkgData) {
 }
 
 // false if method comes from embedded struct field
-func selfMethod(objT types.Type, f *types.Func) bool {
+func selfMethod(objT types.Type, f types.Object) bool {
 	recvT := f.Type().(*types.Signature).Recv().Type()
 
-	// pointers may not equal-compare true; if only one of the two is a pointer, they don't match,
-	// if both are pointers, repeatedly deref both to get the base type
-	for {
-		objPtr, objIsPtr := objT.Underlying().(*types.Pointer)
-		recvPtr, recvIsPtr := recvT.Underlying().(*types.Pointer)
-		if objIsPtr != recvIsPtr {
-			return false
-		}
-
-		if !objIsPtr {
-			break
-		}
-
-		objT = objPtr.Elem()
-		recvT = recvPtr.Elem()
-	}
-
-	return recvT == objT
+	return types.Identical(recvT, objT)
 }
 
 func parseMethod(method types.Object, pkg pkgData) {
@@ -630,7 +692,7 @@ func parseMethods(obj *types.TypeName, pkg pkgData) {
 	for i := 0; i < numMethods; i++ {
 		method := methods.At(i).Obj()
 		handledMethodNames[method.Name()] = true
-		if !selfMethod(objT, method.(*types.Func)) {
+		if !selfMethod(objT, method) {
 			continue // comes from embedded field
 		}
 		parseMethod(method, pkg)
@@ -642,7 +704,7 @@ func parseMethods(obj *types.TypeName, pkg pkgData) {
 
 	for i := 0; i < numPMethods; i++ {
 		method := pMethods.At(i).Obj()
-		if handledMethodNames[method.Name()] || !selfMethod(pObjT, method.(*types.Func)) {
+		if handledMethodNames[method.Name()] || !selfMethod(pObjT, method) {
 			continue // already handled or from embedded field
 		}
 		parseMethod(method, pkg)
@@ -712,64 +774,115 @@ func archSplit(pkgArchs map[string]pkgData) {
 	}
 }
 
-func walkPrint(ch <-chan string, wg *sync.WaitGroup) {
-	fset := token.NewFileSet()
+func pkgParse(inCh <-chan string, outCh chan<- map[string]*packages.Package, chanClose *sync.Once, wg *sync.WaitGroup) {
+	for path := range inCh {
+		fset := token.NewFileSet()
+		astPkgs := check1(parser.ParseDir(fset, path, nil, parser.PackageClauseOnly|parser.ParseComments))
+
+		var deletedKeys []string
+		for key, astPkg := range astPkgs {
+			if strings.HasSuffix(astPkg.Name, "_test") || astPkg.Name == "builtin" || astPkg.Name == "main" {
+				deletedKeys = append(deletedKeys, key)
+			}
+		}
+
+		for _, key := range deletedKeys {
+			delete(astPkgs, key)
+		}
+
+		if len(astPkgs) > 1 {
+			fmt.Println(len(astPkgs), astPkgs)
+			panic(path)
+		}
+
+		for _, astPkg := range astPkgs {
+			outCh <- filterPkg(astPkg, path)
+		}
+	}
+
+	wg.Done()
+	wg.Wait()
+	chanClose.Do(func() { close(outCh) })
+}
+
+func pkgExtract(inCh <-chan map[string]*packages.Package, outCh chan<- map[string]pkgData, chanClose *sync.Once, wg *sync.WaitGroup) {
+	for pkgMap := range inCh {
+		pkgArchs := make(map[string]pkgData)
+		for pkgArch, pkg := range pkgMap {
+			scope := pkg.Types.Scope()
+			names := scope.Names()
+
+			pkgD := newPkgData()
+			for _, name := range names {
+				switch obj := scope.Lookup(name).(type) {
+				case *types.Func:
+					parseFunc(obj, pkgD)
+				case *types.TypeName:
+					parseType(obj, pkgD)
+				}
+			}
+
+			pkgArchs[pkgArch] = pkgD
+		}
+
+		archSplit(pkgArchs)
+		outCh <- pkgArchs
+	}
+
+	wg.Done()
+	wg.Wait()
+	chanClose.Do(func() { close(outCh) })
+}
+
+func pkgMerge(inCh <-chan map[string]pkgData, outPath string, wg *sync.WaitGroup) {
 	allPkgs := make(map[string]pkgData, len(buildConstraints)+1)
 	for arch := range buildConstraints {
 		allPkgs[arch] = newPkgData()
 	}
 	allPkgs["all"] = newPkgData()
 
-	for path := range ch {
-		x := check1(parser.ParseDir(fset, path, nil, parser.PackageClauseOnly|parser.ParseComments))
-
-		for _, astPkg := range x {
-			if strings.HasSuffix(astPkg.Name, "_test") || astPkg.Name == "builtin" || astPkg.Name == "main" {
-				continue
-			}
-
-			if true {
-				pkgMap := filterPkg(astPkg, path)
-				pkgArchs := make(map[string]pkgData)
-				for pkgArch, pkg := range pkgMap {
-					scope := pkg.Types.Scope()
-					names := scope.Names()
-
-					pkgD := newPkgData()
-					for _, name := range names {
-						switch obj := scope.Lookup(name).(type) {
-						case *types.Func:
-							parseFunc(obj, pkgD)
-						case *types.TypeName:
-							parseType(obj, pkgD)
-						}
-					}
-
-					pkgArchs[pkgArch] = pkgD
-				}
-
-				archSplit(pkgArchs)
-
-				for arch, pkg := range pkgArchs {
-					allPkgs[arch].merge(pkg)
-				}
-			}
+	for pkgArchs := range inCh {
+		for arch, pkg := range pkgArchs {
+			allPkgs[arch].merge(pkg)
 		}
 	}
-	fmt.Println(string(check1(json.Marshal(allPkgs))))
+
+	data := check1(json.Marshal(allPkgs))
+
+	check(os.WriteFile(outPath, data, 0o666))
+
 	wg.Done()
 }
 
 func main() {
-	//outPath := check1(filepath.Abs("out.json"))
+	outPath := check1(filepath.Abs("out.json"))
 	check(os.Chdir(os.Args[1]))
 
-	ch := make(chan string, 10)
+	dirChan := make(chan string)
+	pkgChan := make(chan map[string]*packages.Package)
+	pkgDataChan := make(chan map[string]pkgData)
 
-	var wg sync.WaitGroup
+	numProcs := runtime.GOMAXPROCS(0)
+
+	var wg, pkgParseWg, pkgExtractWg sync.WaitGroup
+	pkgParseWg.Add(numProcs)
+	pkgExtractWg.Add(numProcs)
+
+	go pkgMerge(pkgDataChan, outPath, &wg)
+
+	var pkgParseClose, pkgExtractClose sync.Once
+
+	for i := 0; i < numProcs; i++ {
+		go pkgParse(dirChan, pkgChan, &pkgParseClose, &pkgParseWg)
+		go pkgExtract(pkgChan, pkgDataChan, &pkgExtractClose, &pkgExtractWg)
+	}
+
+	dirwalk(dirChan)
+
+	// dirwalk done, start channel close chain
 	wg.Add(1)
-	go walkPrint(ch, &wg)
-	walkTreeDirs(ch, ".")
-	close(ch)
+	close(dirChan)
+
+	// wait for pkgMerge to finish
 	wg.Wait()
 }
