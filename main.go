@@ -569,7 +569,8 @@ func parseType(obj *types.TypeName, pkg pkgData) {
 			doPanic = elT.NumFields() != 0
 		case *types.Basic:
 			// runtime/defs_aix_ppc64.go: type pthread_attr *byte
-			doPanic = !(elT.Kind() == types.Byte && named.Obj().Name() == "pthread_attr")
+			// old runtime versions: runtime/os_windows.go type stdFunction *byte
+			doPanic = !(elT.Kind() == types.Byte && (named.Obj().Name() == "pthread_attr" || named.Obj().Name() == "stdFunction"))
 		default:
 			doPanic = true
 		}
@@ -775,8 +776,8 @@ func archSplit(pkgArchs map[string]pkgData) {
 }
 
 func pkgParse(inCh <-chan string, outCh chan<- map[string]*packages.Package, chanClose *sync.Once, wg *sync.WaitGroup) {
+	fset := token.NewFileSet()
 	for path := range inCh {
-		fset := token.NewFileSet()
 		astPkgs := check1(parser.ParseDir(fset, path, nil, parser.PackageClauseOnly|parser.ParseComments))
 
 		var deletedKeys []string
@@ -855,7 +856,7 @@ func pkgMerge(inCh <-chan map[string]pkgData, outPath string, wg *sync.WaitGroup
 }
 
 func main() {
-	outPath := check1(filepath.Abs("out.json"))
+	outPath := check1(filepath.Abs(os.Args[2]))
 	check(os.Chdir(os.Args[1]))
 
 	dirChan := make(chan string)
