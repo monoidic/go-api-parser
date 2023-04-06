@@ -17,22 +17,21 @@ setup_fake_goroot() {
 
 main() {
 	setup_fake_goroot
-	export GOROOT="$fake_goroot" GOMAXPROCS=4
+	export GOROOT="$fake_goroot" GOMAXPROCS=6
+	mkdir -p results
 
-	for tag in $( cd ~/src/go/; git tag | grep -vE '(weekly|release|beta|rc)' | sort -V ); do
-		rm -f ${fake_goroot}/src
+	for tag in $( cd $go_dir; git tag | grep -vE '(weekly|release|beta|rc)' | sort -V ); do
+		rm ${fake_goroot}/src
 		root=${go_dir}/src$(pre1_4 $tag && echo /pkg)
-		ln -sf $root ${fake_goroot}/src
+		ln -s $root ${fake_goroot}/src
 
 		echo $tag
+		( cd $go_dir; git checkout $tag &>/dev/null )
 
-		(
-			cd ~/src/go/src
-			git checkout $tag &>/dev/null
-		)
-
-		time ./go-api-parser $root results/${tag}.json || exit $?
+		time env version=$tag ./go-api-parser $root results/${tag}.json || exit $?
 	done
+
+	rm -r $fake_goroot
 }
 
 main

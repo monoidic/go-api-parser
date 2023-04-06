@@ -15,64 +15,164 @@ import (
 	"strings"
 	"sync"
 
+	"golang.org/x/mod/semver"
 	"golang.org/x/tools/go/packages"
 )
 
 /* TODO parse:
-* handle type aliased structs, e.g internal/fuzz.CorpusEntry, better,
+* extract data that is specific to just an architecture, e.g amd64 or arm64, or
+  an OS, e.g windows or linux (including "unix" meta OS), and appears in all of them,
+  but does not appear in "all", and extract them out for additional deduplication
+
+* handle "invalid type", seemingly related to unsupported OS/arch combos
+*
+
+  * handle type aliased structs, e.g internal/fuzz.CorpusEntry, better,
   instead of creating a bunch of anonymous struct definitions everywhere they appear
   in function signatures or in structs
 */
 
-// go tool dist list -json | jq -r '.[] | "\u0022" + .GOOS + "-" + .GOARCH + "\u0022,"'
-var architectures = []string{
-	"aix-ppc64",
-	"android-386",
-	"android-amd64",
-	"android-arm",
-	"android-arm64",
-	"darwin-amd64",
-	"darwin-arm64",
-	"dragonfly-amd64",
-	"freebsd-386",
-	"freebsd-amd64",
-	"freebsd-arm",
-	"freebsd-arm64",
-	"freebsd-riscv64",
-	"illumos-amd64",
-	"ios-amd64",
-	"ios-arm64",
-	"js-wasm",
-	"linux-386",
-	"linux-amd64",
-	"linux-arm",
-	"linux-arm64",
-	"linux-loong64",
-	"linux-mips",
-	"linux-mips64",
-	"linux-mips64le",
-	"linux-mipsle",
-	"linux-ppc64",
-	"linux-ppc64le",
-	"linux-riscv64",
-	"linux-s390x",
-	"netbsd-386",
-	"netbsd-amd64",
-	"netbsd-arm",
-	"netbsd-arm64",
-	"openbsd-386",
-	"openbsd-amd64",
-	"openbsd-arm",
-	"openbsd-arm64",
-	"openbsd-mips64",
-	"plan9-386",
-	"plan9-amd64",
-	"plan9-arm",
-	"solaris-amd64",
-	"windows-386",
-	"windows-amd64",
-	"windows-arm",
-	"windows-arm64",
+// everything:  go tool dist list -json | jq -r '.[] | "\u0022" + .GOOS + "-" + .GOARCH + "\u0022,"'
+var architectures = getArchitectures()
+
+func getArchitectures() (out []string) {
+	out = []string{
+		// TODO track these down somehow
+		"android-amd64",
+		"android-amd64-cgo",
+		"android-arm64",
+		"android-arm64-cgo",
+		"darwin-amd64",
+		"darwin-amd64-cgo",
+		"dragonfly-amd64",
+		"dragonfly-amd64-cgo",
+		"freebsd-386",
+		"freebsd-386-cgo",
+		"freebsd-amd64",
+		"freebsd-amd64-cgo",
+		// // added in 1.11, but this is not going to be useful here
+		//"js-wasm",
+		//"js-wasm-cgo",
+		"linux-386",
+		"linux-386-cgo",
+		"linux-amd64",
+		"linux-amd64-cgo",
+		"linux-arm",
+		"linux-ppc64",
+		"linux-ppc64le",
+		"linux-ppc64le-cgo",
+		"windows-386",
+		"windows-386-cgo",
+		"windows-amd64",
+		"windows-amd64-cgo",
+	}
+	version := os.Getenv("version")
+	if version == "" {
+		version = runtime.Version()
+	}
+	version = "v" + version[2:] // e.g go1.20.2 to v1.20.2
+
+	// https://go.dev/doc/go1.1#platforms
+	if semver.Compare(version, "v1.0.9999") == -1 {
+		return
+	}
+	out = append(out,
+		"freebsd-arm", "freebsd-arm-cgo", "netbsd-386", "netbsd-386-cgo", "netbsd-amd64",
+		"netbsd-amd64-cgo", "netbsd-arm", "netbsd-arm-cgo", "openbsd-386", "openbsd-386-cgo",
+		"openbsd-amd64", "openbsd-amd64-cgo", "linux-arm-cgo",
+	)
+
+	// https://go.dev/doc/go1.3#os
+	if semver.Compare(version, "v1.3") == -1 {
+		return
+	}
+	out = append(out, "plan9-386", "plan9-386-cgo", "solaris-amd64", "solaris-amd64-cgo")
+
+	// https://go.dev/doc/go1.4#os
+	if semver.Compare(version, "v1.4") == -1 {
+		return
+	}
+	out = append(out, "android-arm", "android-arm-cgo", "plan9-amd64", "plan9-amd64-cgo")
+
+	// https://go.dev/doc/go1.5#ports
+	if semver.Compare(version, "v1.5") == -1 {
+		return
+	}
+	out = append(out, "darwin-arm64", "darwin-arm64-cgo", "linux-arm64", "linux-arm64-cgo")
+
+	// https://go.dev/doc/go1.6#ports
+	if semver.Compare(version, "v1.6") == -1 {
+		return
+	}
+	out = append(out,
+		"linux-mips64", "linux-mips64-cgo", "linux-mips64le", "linux-mips64le-cgo",
+		"android-386", "android-386-cgo",
+	)
+
+	// https://go.dev/doc/go1.7#ports
+	if semver.Compare(version, "v1.7") == -1 {
+		return
+	}
+	out = append(out, "linux-s390x", "linux-s390x-cgo", "plan9-arm", "plan9-arm-cgo")
+
+	// https://go.dev/doc/go1.8#ports
+	if semver.Compare(version, "v1.8") == -1 {
+		return
+	}
+	out = append(out, "linux-mips", "linux-mips-cgo", "linux-mipsle", "linux-mipsle-cgo")
+
+	// https://go.dev/doc/go1.12#ports
+	if semver.Compare(version, "v1.12") == -1 {
+		return
+	}
+	out = append(out, "linux-ppc64-cgo", "windows-arm", "windows-arm-cgo", "aix-ppc64")
+
+	// https://go.dev/doc/go1.13#ports
+	if semver.Compare(version, "v1.13") == -1 {
+		return
+	}
+	out = append(out, "aix-ppc64-cgo", "illumos-amd64", "illumos-amd64-cgo")
+
+	// https://go.dev/doc/go1.14#ports
+	if semver.Compare(version, "v1.14") == -1 {
+		return
+	}
+	out = append(out, "linux-riscv64", "freebsd-arm64", "freebsd-arm64-cgo")
+
+	// https://go.dev/doc/go1.15#ports
+	if semver.Compare(version, "v1.15") == -1 {
+		return
+	}
+	out = append(out, "openbsd-arm", "openbsd-arm-cgo", "openbsd-arm64", "openbsd-arm64-cgo")
+
+	// https://go.dev/doc/go1.16#ports
+	if semver.Compare(version, "v1.16") == -1 {
+		return
+	}
+	out = append(out,
+		"ios-arm64", "ios-arm64-cgo", "ios-amd64", "ios-amd64-cgo",
+		"netbsd-arm64", "netbsd-arm64-cgo", "openbsd-mips64", "linux-riscv64-cgo",
+	)
+
+	// https://go.dev/doc/go1.17#ports
+	if semver.Compare(version, "v1.17") == -1 {
+		return
+	}
+	out = append(out, "windows-arm64", "windows-arm64-cgo", "openbsd-mips64-cgo")
+
+	// https://go.dev/doc/go1.19#ports
+	if semver.Compare(version, "v1.19") == -1 {
+		return
+	}
+	out = append(out, "linux-loong64", "linux-loong64-cgo")
+
+	// https://go.dev/doc/go1.20#ports
+	if semver.Compare(version, "v1.20") == -1 {
+		return
+	}
+	out = append(out, "freebsd-riscv64", "freebsd-riscv64-cgo")
+
+	return out
 }
 
 type dirStack struct {
@@ -97,17 +197,15 @@ func (s *dirStack) pop() (string, bool) {
 }
 
 func getBuildConstraints() map[string]map[string]bool {
-	out := make(map[string]map[string]bool, len(architectures)*2)
+	out := make(map[string]map[string]bool)
 
-	for _, architectureBase := range architectures {
-		for _, architecture := range []string{architectureBase, architectureBase + "-cgo"} {
-			split := strings.Split(architectureBase, "-")
-			archMap := make(map[string]bool, len(split))
-			for _, tag := range split {
-				archMap[tag] = true
-			}
-			out[architecture] = archMap
+	for _, architecture := range architectures {
+		split := strings.Split(architecture, "-")
+		archMap := make(map[string]bool, len(split))
+		for _, tag := range split {
+			archMap[tag] = true
 		}
+		out[architecture] = archMap
 	}
 
 	return out
@@ -208,10 +306,18 @@ var knownArch = map[string]bool{
 	"wasm":        true,
 }
 
+// go/build/build.go goodOSArchFile
 func getFilenameBuildTags(filePath string) (goos, goarch string) {
 	fileName := filepath.Base(filePath)
 	fileName = fileName[:len(fileName)-3]             // remove .go
 	potentialTags := strings.Split(fileName, "_")[1:] // drop anything before first _
+
+	/*
+		if len(potentialTags) > 0 && potentialTags[len(potentialTags)-1] == "test" {
+			potentialTags = potentialTags[:len(potentialTags)-1]
+		}
+	*/
+
 	if len(potentialTags) == 0 {
 		return
 	}
@@ -255,6 +361,12 @@ func commentTags(commentGroups []*ast.CommentGroup) constraint.Expr {
 	return nil
 }
 
+var extraTagMap = map[string]string{
+	"android": "linux",
+	"illumos": "solaris",
+	"ios":     "darwin",
+}
+
 func getTags(filePath string, fileObj *ast.File) constraint.Expr {
 	expr := commentTags(fileObj.Comments)
 
@@ -264,7 +376,12 @@ func getTags(filePath string, fileObj *ast.File) constraint.Expr {
 		if tag == "" {
 			continue
 		}
-		tagExpr := &constraint.TagExpr{Tag: tag}
+
+		var tagExpr constraint.Expr = &constraint.TagExpr{Tag: tag}
+		if extraTag, ok := extraTagMap[tag]; ok {
+			tagExpr = &constraint.OrExpr{X: tagExpr, Y: &constraint.TagExpr{Tag: extraTag}}
+		}
+
 		if expr == nil {
 			expr = tagExpr
 		} else {
@@ -311,9 +428,21 @@ func getEnv(arch string) []string {
 	if arch == "all" {
 		return out
 	}
-	split := strings.Split(arch, "-")
-	out = append(out, fmt.Sprintf("GOOS=%s", split[0]), fmt.Sprintf("GOARCH=%s", split[1]))
-	if len(split) == 2 { // no cgo
+
+	hasCGO := false
+	for _, s := range strings.Split(arch, "-") {
+		if knownArch[s] {
+			out = append(out, fmt.Sprintf("GOARCH=%s", s))
+		} else if knownOS[s] {
+			out = append(out, fmt.Sprintf("GOOS=%s", s))
+		} else if s == "cgo" {
+			hasCGO = true
+		} else {
+			panic(arch)
+		}
+	}
+
+	if !hasCGO {
 		out = append(out, "CGO_ENABLED=0")
 	}
 
@@ -321,7 +450,7 @@ func getEnv(arch string) []string {
 }
 
 func parseDiscardFuncBody(fset *token.FileSet, filename string, src []byte) (*ast.File, error) {
-	f, err := parser.ParseFile(fset, filename, src, parser.AllErrors)
+	f, err := parser.ParseFile(fset, filename, src, 0)
 
 	for _, decl := range f.Decls {
 		if funcDecl, ok := decl.(*ast.FuncDecl); ok {
@@ -363,8 +492,6 @@ func filterPkg(pkg *ast.Package, path string) map[string]*packages.Package {
 		// non-"all" files exist + every arch is matched by at least one file,
 		// nothing more to be learned here
 		if len(archMatches) == len(buildConstraints)+1 {
-			// arch-specific stuff crops up at least once, "all" would just be a duplicate here
-			delete(archMatches, "all")
 			break
 		}
 	}
@@ -773,6 +900,53 @@ func archSplit(pkgArchs map[string]pkgData) {
 	if !pkgAllArch.empty() {
 		pkgArchs["all"] = pkgAllArch
 	}
+
+	postMerge(func(arch string) bool { split := strings.Split(arch, "-"); return split[len(split)-1] == "cgo" }, pkgArchs, "cgo")
+	postMerge(func(arch string) bool { return unixOS[strings.Split(arch, "-")[0]] }, pkgArchs, "unix")
+
+	for archStr := range knownArch {
+		postMerge(func(arch string) bool {
+			split := strings.Split(arch, "-")
+			return len(split) > 1 && split[1] == archStr
+		}, pkgArchs, archStr)
+	}
+
+	for osStr := range knownOS {
+		postMerge(func(arch string) bool { return strings.Split(arch, "-")[0] == osStr }, pkgArchs, osStr)
+	}
+}
+
+// group up results by archFilter, get items in every arch in the group, and extract to separate "arch"
+func postMerge(archFilter func(string) bool, pkgArchs map[string]pkgData, name string) {
+	var filtered pkgData
+	firstPkg := true
+
+	for arch, pkgD := range pkgArchs {
+		if !archFilter(arch) {
+			continue
+		}
+
+		if firstPkg {
+			filtered = pkgD
+			firstPkg = false
+		} else {
+			filtered = filtered.and(pkgD)
+		}
+	}
+
+	// found nothing
+	if filtered.empty() {
+		return
+	}
+
+	// remove duplicates
+	for arch, pkgD := range pkgArchs {
+		if archFilter(arch) {
+			pkgD.not(filtered)
+		}
+	}
+
+	pkgArchs[name] = filtered
 }
 
 func pkgParse(inCh <-chan string, outCh chan<- map[string]*packages.Package, chanClose *sync.Once, wg *sync.WaitGroup) {
@@ -836,14 +1010,13 @@ func pkgExtract(inCh <-chan map[string]*packages.Package, outCh chan<- map[strin
 }
 
 func pkgMerge(inCh <-chan map[string]pkgData, outPath string, wg *sync.WaitGroup) {
-	allPkgs := make(map[string]pkgData, len(buildConstraints)+1)
-	for arch := range buildConstraints {
-		allPkgs[arch] = newPkgData()
-	}
-	allPkgs["all"] = newPkgData()
+	allPkgs := make(map[string]pkgData)
 
 	for pkgArchs := range inCh {
 		for arch, pkg := range pkgArchs {
+			if _, ok := allPkgs[arch]; !ok {
+				allPkgs[arch] = newPkgData()
+			}
 			allPkgs[arch].merge(pkg)
 		}
 	}
