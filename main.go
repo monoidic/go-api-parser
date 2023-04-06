@@ -36,35 +36,27 @@ import (
 var architectures = getArchitectures()
 
 func getArchitectures() (out []string) {
+	// TODO check ALL of this over
 	out = []string{
-		// TODO track these down somehow
-		"android-amd64",
-		"android-amd64-cgo",
-		"android-arm64",
-		"android-arm64-cgo",
 		"darwin-amd64",
 		"darwin-amd64-cgo",
-		"dragonfly-amd64",
-		"dragonfly-amd64-cgo",
 		"freebsd-386",
 		"freebsd-386-cgo",
 		"freebsd-amd64",
 		"freebsd-amd64-cgo",
-		// // added in 1.11, but this is not going to be useful here
-		//"js-wasm",
-		//"js-wasm-cgo",
 		"linux-386",
 		"linux-386-cgo",
-		"linux-amd64",
-		"linux-amd64-cgo",
-		"linux-arm",
-		"linux-ppc64",
-		"linux-ppc64le",
-		"linux-ppc64le-cgo",
 		"windows-386",
 		"windows-386-cgo",
 		"windows-amd64",
 		"windows-amd64-cgo",
+		"linux-amd64",
+		"linux-amd64-cgo",
+		// should be fine above here
+		// TODO track these down somehow
+		"linux-ppc64",
+		// // added in 1.11, but this is not going to be useful here
+		//"js-wasm",
 	}
 	version := os.Getenv("version")
 	if version == "" {
@@ -73,32 +65,44 @@ func getArchitectures() (out []string) {
 	version = "v" + version[2:] // e.g go1.20.2 to v1.20.2
 
 	// https://go.dev/doc/go1.1#platforms
-	if semver.Compare(version, "v1.0.9999") == -1 {
+	if semver.Compare(version, "v1.1") == -1 {
 		return
 	}
 	out = append(out,
-		"freebsd-arm", "freebsd-arm-cgo", "netbsd-386", "netbsd-386-cgo", "netbsd-amd64",
+		"freebsd-arm", "netbsd-386", "netbsd-386-cgo", "netbsd-amd64",
 		"netbsd-amd64-cgo", "netbsd-arm", "netbsd-arm-cgo", "openbsd-386", "openbsd-386-cgo",
 		"openbsd-amd64", "openbsd-amd64-cgo", "linux-arm-cgo",
 	)
+
+	// ???
+	if semver.Compare(version, "v1.2") == -1 {
+		return
+	}
+	out = append(out, "dragonfly-amd64", "dragonfly-amd64-cgo")
 
 	// https://go.dev/doc/go1.3#os
 	if semver.Compare(version, "v1.3") == -1 {
 		return
 	}
-	out = append(out, "plan9-386", "plan9-386-cgo", "solaris-amd64", "solaris-amd64-cgo")
+	out = append(out, "plan9-386", "solaris-amd64")
 
 	// https://go.dev/doc/go1.4#os
 	if semver.Compare(version, "v1.4") == -1 {
 		return
 	}
-	out = append(out, "android-arm", "android-arm-cgo", "plan9-amd64", "plan9-amd64-cgo")
+	out = append(out,
+		"android-arm", "android-arm-cgo", "plan9-amd64", "android-amd64",
+		"android-amd64-cgo", "android-arm64", "android-arm64-cgo",
+	)
 
 	// https://go.dev/doc/go1.5#ports
 	if semver.Compare(version, "v1.5") == -1 {
 		return
 	}
-	out = append(out, "darwin-arm64", "darwin-arm64-cgo", "linux-arm64", "linux-arm64-cgo")
+	out = append(out,
+		"darwin-arm64", "darwin-arm64-cgo", "linux-arm64",
+		"linux-arm64-cgo", "linux-ppc64le", "linux-ppc64le-cgo", "solaris-amd64-cgo",
+	)
 
 	// https://go.dev/doc/go1.6#ports
 	if semver.Compare(version, "v1.6") == -1 {
@@ -113,7 +117,7 @@ func getArchitectures() (out []string) {
 	if semver.Compare(version, "v1.7") == -1 {
 		return
 	}
-	out = append(out, "linux-s390x", "linux-s390x-cgo", "plan9-arm", "plan9-arm-cgo")
+	out = append(out, "linux-s390x", "linux-s390x-cgo", "plan9-arm")
 
 	// https://go.dev/doc/go1.8#ports
 	if semver.Compare(version, "v1.8") == -1 {
@@ -121,37 +125,47 @@ func getArchitectures() (out []string) {
 	}
 	out = append(out, "linux-mips", "linux-mips-cgo", "linux-mipsle", "linux-mipsle-cgo")
 
+	// ???
+	if semver.Compare(version, "v1.11") == -1 {
+		return
+	}
+	out = append(out, "linux-riscv64")
+
 	// https://go.dev/doc/go1.12#ports
 	if semver.Compare(version, "v1.12") == -1 {
 		return
 	}
-	out = append(out, "linux-ppc64-cgo", "windows-arm", "windows-arm-cgo", "aix-ppc64")
+	// go tool dist list -json | jq '.[] | select(.CgoSupported == false and .GOARCH == "ppc64")'
+	// does linux-ppc64 support CGO or not?
+	out = append(out, "linux-ppc64-cgo", "windows-arm", "aix-ppc64", "openbsd-arm-cgo")
 
 	// https://go.dev/doc/go1.13#ports
 	if semver.Compare(version, "v1.13") == -1 {
 		return
 	}
-	out = append(out, "aix-ppc64-cgo", "illumos-amd64", "illumos-amd64-cgo")
+	out = append(out,
+		"aix-ppc64-cgo", "illumos-amd64", "illumos-amd64-cgo", "freebsd-arm-cgo",
+		"netbsd-arm64", "netbsd-arm64-cgo", "openbsd-arm64", "openbsd-arm64-cgo",
+	)
 
 	// https://go.dev/doc/go1.14#ports
 	if semver.Compare(version, "v1.14") == -1 {
 		return
 	}
-	out = append(out, "linux-riscv64", "freebsd-arm64", "freebsd-arm64-cgo")
+	out = append(out, "freebsd-arm64", "freebsd-arm64-cgo")
 
 	// https://go.dev/doc/go1.15#ports
 	if semver.Compare(version, "v1.15") == -1 {
 		return
 	}
-	out = append(out, "openbsd-arm", "openbsd-arm-cgo", "openbsd-arm64", "openbsd-arm64-cgo")
+	out = append(out, "openbsd-arm")
 
 	// https://go.dev/doc/go1.16#ports
 	if semver.Compare(version, "v1.16") == -1 {
 		return
 	}
 	out = append(out,
-		"ios-arm64", "ios-arm64-cgo", "ios-amd64", "ios-amd64-cgo",
-		"netbsd-arm64", "netbsd-arm64-cgo", "openbsd-mips64", "linux-riscv64-cgo",
+		"ios-arm64", "ios-arm64-cgo", "ios-amd64", "ios-amd64-cgo", "openbsd-mips64", "linux-riscv64-cgo",
 	)
 
 	// https://go.dev/doc/go1.17#ports
