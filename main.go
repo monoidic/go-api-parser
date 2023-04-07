@@ -879,42 +879,12 @@ func archSplit(pkgArchs map[string]pkgData) {
 		return
 	}
 
-	// does not have at least one element on every arch (excluding "all"), skip
+	// does not have at least one element on every arch, skip
 	if len(pkgArchs) != len(buildConstraints) {
 		return
 	}
 
-	// get data that is common between all architectures
-	var pkgAllArch pkgData
-	firstPkg := true
-	for _, pkg := range pkgArchs {
-		if !firstPkg {
-			pkgAllArch = pkgAllArch.and(pkg)
-		} else {
-			pkgAllArch = pkg
-			firstPkg = false
-		}
-	}
-
-	// remove common parts from all architectures
-	var emptyKeys []string
-	for key, pkg := range pkgArchs {
-		pkg.not(pkgAllArch)
-		if pkg.empty() {
-			emptyKeys = append(emptyKeys, key)
-		}
-	}
-
-	// remove architectures that have no unique parts left
-	for _, key := range emptyKeys {
-		delete(pkgArchs, key)
-	}
-
-	// add common parts back as "all" architecture
-	if !pkgAllArch.empty() {
-		pkgArchs["all"] = pkgAllArch
-	}
-
+	postMerge(func(string) bool { return true }, pkgArchs, "all")
 	postMerge(func(arch string) bool { split := strings.Split(arch, "-"); return split[len(split)-1] == "cgo" }, pkgArchs, "cgo")
 	postMerge(func(arch string) bool { return unixOS[strings.Split(arch, "-")[0]] }, pkgArchs, "unix")
 
@@ -953,11 +923,20 @@ func postMerge(archFilter func(string) bool, pkgArchs map[string]pkgData, name s
 		return
 	}
 
+	var emptyKeys []string
+
 	// remove duplicates
 	for arch, pkgD := range pkgArchs {
 		if archFilter(arch) {
 			pkgD.not(filtered)
+			if pkgD.empty() {
+				emptyKeys = append(emptyKeys, arch)
+			}
 		}
+	}
+
+	for _, key := range emptyKeys {
+		delete(pkgArchs, key)
 	}
 
 	pkgArchs[name] = filtered
