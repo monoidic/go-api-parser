@@ -44,6 +44,6 @@ delta = get_delta(v1, v2)
 delta_applied = apply_delta(v1_copy, delta)
 
 if json.dumps(delta_applied, sort_keys=True) == json.dumps(v2_copy, sort_keys=True):
-    print('success')
+    print("success")
 else:
-    print('failure')
+    print("failure")
