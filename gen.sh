@@ -1,7 +1,12 @@
 #!/bin/bash
 
 go_dir=~/src/go
-fake_goroot=/dev/shm/fake_goroot # mktemp -d
+fake_goroot=$(mktemp -d)
+
+cleanup_fake_goroot() {
+	rm -r $fake_goroot
+}
+
 
 pre1_4() {
 	[[ $(printf '%s\ngo1.4\n' "$1" | sort -V | head -n1) != go1.4 ]]
@@ -17,10 +22,11 @@ setup_fake_goroot() {
 
 main() {
 	setup_fake_goroot
-	export GOROOT="$fake_goroot" GOMAXPROCS=6
+	trap cleanup_fake_goroot EXIT
+	export GOROOT="$fake_goroot"
 	mkdir -p results
 
-	for tag in $( cd $go_dir; git tag | grep -vE '(weekly|release|beta|rc)' | sort -V ); do
+	for tag in $( cd $go_dir; git tag | grep -vE '(weekly|release|beta|rc)' | sort -V | grep -A 999 go1.14 ); do
 		rm ${fake_goroot}/src
 		root=${go_dir}/src$(pre1_4 $tag && echo /pkg)
 		ln -s $root ${fake_goroot}/src
@@ -30,8 +36,6 @@ main() {
 
 		time env version=$tag ./go-api-parser $root results/${tag}.json || exit $?
 	done
-
-	rm -r $fake_goroot
 }
 
 main
