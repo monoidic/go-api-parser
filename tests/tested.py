@@ -1,7 +1,8 @@
 from itertools import chain
 
 import data
-from mocked_ghidra import MockGhidraRegister, VariableStorage, ParameterImpl, AbstractFloatDataType
+
+from mocked_ghidra import MockGhidraRegister, VariableStorage, ParameterImpl
 
 # start of setup
 ptr = data.Pointer64DataType
@@ -118,25 +119,19 @@ currentProgram = None  # noqa:N816
 # (for handling composite types like structs) into registers
 # if all given types do not fit into registers, returns None,
 # otherwise returns a list of the used registers for the given datatype
-
-
 def assign_registers(int_registers, float_registers, types):
     # clone + reverse for .pop() and .append()
     int_registers = int_registers[::-1]
     float_registers = float_registers[::-1]
     out = []
 
-    for t in sorted(types, key=lambda x: x.getLength(), reverse=True):
+    for t in types:
         t_len = t.getLength()
         while t_len:  # allocate parts of
-            if isinstance(t, data.AbstractFloatDataType):
+            if False:
                 registers = float_registers
             else:
                 registers = int_registers
-
-            # prioritize registers based on their size
-            registers = sorted(
-                registers, key=lambda x: x.getBitLength(), reverse=True)
 
             if len(registers) == 0:
                 return None
