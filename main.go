@@ -24,8 +24,9 @@ import (
   an OS, e.g windows or linux (including "unix" meta OS), and appears in all of them,
   but does not appear in "all", and extract them out for additional deduplication
 
-* handle "invalid type", seemingly related to unsupported OS/arch combos
-*
+* extract types from modules (*only* extract types which appear in function signatures?)
+
+* data dedup leaves empty objects behind?
 
   * handle type aliased structs, e.g internal/fuzz.CorpusEntry, better,
   instead of creating a bunch of anonymous struct definitions everywhere they appear
@@ -897,6 +898,10 @@ func archSplit(pkgArchs map[string]pkgData) {
 
 	for osStr := range knownOS {
 		postMerge(func(arch string) bool { return strings.Split(arch, "-")[0] == osStr }, pkgArchs, osStr)
+		postMerge(func(arch string) bool {
+			split := strings.Split(arch, "-")
+			return split[0] == osStr && split[len(split)-1] == "cgo"
+		}, pkgArchs, osStr+"-cgo")
 	}
 }
 
