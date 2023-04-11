@@ -1,6 +1,7 @@
 # currently specific to AMD64 (and possibly Linux)
 
 from itertools import chain
+from collections import defaultdict
 import json
 import os.path
 
@@ -22,8 +23,11 @@ current_arch = 'windows-amd64'
 
 # get function signatures applying to all architectures
 # + those specific to the current architecture
-funcmap = definitions['FuncMap']['all']
-funcmap.update(definitions['FuncMap'][current_arch])
+funcmap = {}
+for tag in set(
+    ('all', 'cgo', 'amd64', 'windows', 'windows-amd64', 'windows-amd64-cgo')
+) & set(definitions):
+    funcmap.update(definitions[tag]['Funcs'])
 
 # set type of int and uint, and type and size of ptr depending on
 # whether the system is 32-bit or 64-bit
@@ -78,7 +82,7 @@ registers = {
 
 # map Go type name strings to constructors matching said types in Ghidra
 # https://ghidra.re/ghidra_docs/api/ghidra/program/model/data/package-summary.html
-type_map = {
+builtins_map = {
     'iface': lambda: go_iface,
     'bool': data.BooleanDataType,
     'byte': data.ByteDataType,
@@ -110,6 +114,20 @@ type_map = {
     'map': lambda: go_map,
 }
 
+align_map = defaultdict(lambda: ptr_size, {
+    'bool': 1,
+    'uint8': 1,
+    'int8': 1,
+    'byte': 1,
+    'uint16': 2,
+    'int16': 2,
+    'uint32': 4,
+    'int32': 4,
+    'rune': 4,
+    'float32': 4,
+    'complex64': 4,
+})
+
 # recursively parses a type string
 # expects a base string matching a type listed in the above type_map,
 # and potentially a number of pointer or array type suffixes,
@@ -127,7 +145,7 @@ def get_type(s):
         element_type = get_type(element_s)
         return data.ArrayDataType(element_type, arr_len, element_type.getLength())
 
-    return type_map[s]()
+    return builtins_map[s]()
 
 # for dynamically created struct types; see below
 dynamic_type_map = {}
@@ -265,6 +283,13 @@ def get_results(result_types):
     storage = VariableStorage(currentProgram, *assigned)
 
     return datatype, storage
+
+
+# these need to be parsed together, because the stack positioning
+# of the parameters affects the stack positioning of the results
+def get_storage(param_types, result_types):
+    pass
+
 
 # recursively unpack types into component types
 # just yields a single type for a non-composite type,
