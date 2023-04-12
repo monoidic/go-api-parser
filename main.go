@@ -740,16 +740,8 @@ func (pkg *pkgData) parseType(obj *types.TypeName) {
 		if doPanic {
 			panic(fmt.Sprintf("pkg %s, type %s", named.Obj().Pkg().Path(), named))
 		}
-	case *types.Array:
-		pkg.Types[name] = typeData{Underlying: "arr"}
-	case *types.Slice:
-		pkg.Types[name] = typeData{Underlying: "slice"}
-	case *types.Signature:
-		pkg.Types[name] = typeData{Underlying: "code*"}
-	case *types.Map:
-		pkg.Types[name] = typeData{Underlying: "map"}
-	case *types.Chan:
-		pkg.Types[name] = typeData{Underlying: "chan"}
+	case *types.Array, *types.Slice, *types.Map, *types.Chan, *types.Signature:
+		pkg.Types[name] = typeData{Underlying: pkg.getTypeName(t, name)}
 	default:
 		_ = named.Underlying().(*types.Basic)
 	}

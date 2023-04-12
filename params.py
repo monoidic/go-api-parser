@@ -70,6 +70,8 @@ go_chan.add(ptr(data.Undefined1DataType()), ptr_size, 'ptr', None)
 go_map = data.StructureDataType('go_map', 0)
 go_map.add(ptr(data.Undefined1DataType()), ptr_size, 'ptr', None)
 
+go_error = data.StructureDataType('go_error', 0)
+go_error.add(go_iface, ptr_size * 2, 'iface', None)
 
 # architecture-specific; TODO select based on architecture
 # https://github.com/golang/go/blob/master/src/cmd/compile/abi-internal.md#amd64-architecture
@@ -105,10 +107,10 @@ builtins_map = {
     'uint64': data.QWordDataType,
     'uint8': data.ByteDataType,
     'uintptr': uint_t,
+    'unsafe.Pointer': lambda: ptr(data.Undefined1DataType()),
     'undefined8': data.Undefined8DataType,
     'undefined': data.Undefined1DataType,
-    # 'slice': lambda: go_slice,
-    'error': lambda: go_iface,
+    'error': lambda: go_error,
     'code': data.Undefined1DataType,  # TODO something better here?
     # probably don't care about the internals of these
     'chan': lambda: go_chan,
@@ -151,6 +153,7 @@ def align(x, y):
 def get_type(s):
     if s in type_map:
         return type_map[s]
+
     if s in builtins_map:
         t = builtins_map[s]()
         ret = t, t.getLength(), align_map[s]
@@ -169,13 +172,12 @@ def get_type(s):
         ret = go_iface, 2 * ptr_size, ptr_size
     elif s in prog_definitions['Structs']:
         ret = get_struct(s)
+    elif s in prog_definitions['Types']:
+        ret = get_type(prog_definitions['Types'][s]['Underlying'])
+    elif s in prog_definitions['Aliases']:
+        ret = get_type(prog_definitions['Aliases'][s]['Target'])
     else:
-        for k in ('Types', 'Aliases'):
-            if s in prog_definitions[k]:
-                ret = get_type(prog_definitions[k][s])
-                break
-        else:
-            raise Exception('unknown type {}'.format(s))
+        raise Exception('unknown type {}'.format(s))
 
     type_map[s] = ret
     return ret
@@ -190,7 +192,7 @@ def get_struct(name):
         return struct_defs[name]
 
     struct_t = data.StructureDataType(name, 0)
-    struct_defs[name] = struct_t
+    struct_defs[name] = struct_t, 'x', 'y'
 
     fields = [
         (get_type(field['DataType']), field['Name'])
@@ -198,24 +200,30 @@ def get_struct(name):
     ]
 
     if not fields:
-        return struct_t, 0, 1
+        res = struct_t, 0, 1
+        struct_defs[name] = res
+        return res
 
     current_offset = 0
     alignment = max(field[0][2] for field in fields)
 
     for ((field_t, field_size, field_align), field_name) in fields:
+        if not field_size:
+            continue
         field_offset = align(current_offset, field_align)
         new_offset = field_offset + field_size
-        struct_t.growStructure(new_offset - current_offset)
+        #struct_t.growStructure(new_offset - current_offset)
         current_offset = new_offset
         struct_t.insertAtOffset(field_offset, field_t, field_size, field_name, None)
 
     # required padding byte for non-empty structs
-    struct_t.growStructure(1)
-    struct_t.insertAtOffset(current_offset, data.ByteDataType, 1, '_padding_byte', None)
-    current_offset += 1
+    #struct_t.growStructure(1)
+    #struct_t.replaceAtOffset(current_offset, data.ByteDataType(), 1, '_padding_byte', None)
+    #current_offset += 1
 
-    return struct_t, current_offset, alignment
+    res = struct_t, current_offset, alignment
+    struct_defs[name] = res
+    return res
 
 
 # for dynamically created struct types; see below
@@ -254,6 +262,9 @@ def functions_iter():
 # (for handling composite types like structs) into registers
 # if all given types do not fit into registers, returns None,
 # otherwise returns a list of the used registers for the given datatype
+# 
+# TODO add dummy storage here so struct padding doesn't make
+# storage size checks fail
 def assign_registers(I, FP, datatype):
     # clone + reverse for .pop() and .append()
     current_int_registers = [regmap[reg] for reg in integer_registers[I:][::-1]]
@@ -320,9 +331,11 @@ def get_params(param_types):
     stack_offset = 0
     I = 0
     FP = 0
+    # print(param_types)
 
     for param in param_types:
         storage, datatype, I, FP, stack_offset = assign_type(param['DataType'], I, FP, stack_offset)
+        # print('storage = {}, datatype = {}, I = {}, FP = {}, stack_offset = {}'.format(storage, datatype, I, FP, stack_offset))
 
         result_params.append(ParameterImpl(
             param['Name'],
@@ -346,15 +359,14 @@ def get_results(result_types, stack_offset):
     varnodes = []
 
     if len(result_types) == 1:
-        ret_datatype = get_type(result_types[0]['DataType'])
+        ret_datatype = get_type(result_types[0]['DataType'])[0]
     else:
-        ret_datatype = get_dynamic_type(result['DataType'] for result in result_types)
+        ret_datatype = get_dynamic_type([result['DataType'] for result in result_types])
 
     for param in result_types:
         storage, datatype, I, FP, stack_offset = assign_type(param['DataType'], I, FP, stack_offset)
         varnodes.extend(storage.getVarnodes())
 
-    print(varnodes)
     storage = VariableStorage(currentProgram, *varnodes)
 
     return ret_datatype, storage
@@ -371,7 +383,6 @@ def set_storage(func, param_types, result_types):
     ret_datatype, ret_storage = get_results(result_types, stack_offset)
 
     func.replaceParameters(FunctionUpdateType.CUSTOM_STORAGE, True, SourceType.USER_DEFINED, *params)
-    print('ret_datatype={}'.format(ret_datatype))
     func.setReturn(ret_datatype, ret_storage, SourceType.USER_DEFINED)
 
 
