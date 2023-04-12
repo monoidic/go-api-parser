@@ -23,11 +23,14 @@ current_arch = 'windows-amd64'
 
 # get function signatures applying to all architectures
 # + those specific to the current architecture
-funcmap = {}
-for tag in set(
-    ('all', 'cgo', 'amd64', 'windows', 'windows-amd64', 'windows-amd64-cgo')
-) & set(definitions):
-    funcmap.update(definitions[tag]['Funcs'])
+prog_definitions = definitions['all']
+for tag in set((
+    'cgo', 'amd64', 'windows', 'windows-amd64',
+    'windows-cgo', 'windows-amd64-cgo',
+)) & set(definitions):
+    new_definitions = definitions[tag]
+    for key in ('Aliases', 'Funcs', 'Interfaces', 'Structs', 'Types'):
+        prog_definitions[key].update(new_definitions[key])
 
 # set type of int and uint, and type and size of ptr depending on
 # whether the system is 32-bit or 64-bit
@@ -75,7 +78,7 @@ float_registers = ['XMM{}'.format(i) for i in range(15)]
 
 # map name string, e.g "RAX", to Ghidra register object corresponding to the register
 # https://ghidra.re/ghidra_docs/api/ghidra/program/model/lang/Register.html
-registers = {
+regmap = {
     reg: currentProgram.getRegister(reg)
     for reg in chain(integer_registers, float_registers)
 }
@@ -104,9 +107,7 @@ builtins_map = {
     'uintptr': uint_t,
     'undefined8': data.Undefined8DataType,
     'undefined': data.Undefined1DataType,
-    # TODO get struct definitions
-    'struct': data.Undefined1DataType,
-    'slice': lambda: go_slice,
+    # 'slice': lambda: go_slice,
     'error': lambda: go_iface,
     'code': data.Undefined1DataType,  # TODO something better here?
     # probably don't care about the internals of these
@@ -128,27 +129,98 @@ align_map = defaultdict(lambda: ptr_size, {
     'complex64': 4,
 })
 
-# recursively parses a type string
-# expects a base string matching a type listed in the above type_map,
-# and potentially a number of pointer or array type suffixes,
-# which it will recursively convert into the proper types,
-# e.g "int*" on a 32-bit platform into
-# a data.Pointer32DataType referencing a data.SignedDWordDataType,
-# or a "int[4]*" into a data.Pointer32DataType referencing a data.ArrayDataType
-# referencing 4 instances of data.SignedDWordDataType
-def get_type(s):
-    if s.endswith('*'):  # pointer
-        return ptr(get_type(s[:-1]))
-    if s.endswith(']'):  # array
-        element_s, num = s[:-1].rsplit('[', 1)
-        arr_len = int(num)
-        element_type = get_type(element_s)
-        return data.ArrayDataType(element_type, arr_len, element_type.getLength())
+slices_map = {}
 
-    return builtins_map[s]()
+
+def make_slice(t, name):
+    if name in slices_map:
+        return slices_map[name]
+    slice_t = data.StructureDataType(name + '[]', 0)
+    slice_t.add(ptr(t), ptr_size, 'ptr', None)
+    slice_t.add(int_t(), ptr_size, 'len', None)
+    slice_t.add(int_t(), ptr_size, 'cap', None)
+    return slice_t
+
+
+type_map = {}
+
+def align(x, y):
+    return x + (-x % y)
+
+
+def get_type(s):
+    if s in type_map:
+        return type_map[s]
+    if s in builtins_map:
+        t = builtins_map[s]()
+        ret = t, t.getLength(), align_map[s]
+    elif s.endswith('*'):  # pointer
+        ret = ptr(get_type(s[:-1])[0]), ptr_size, ptr_size
+    elif s.endswith(']'):  # array
+        element_s, num = s[:-1].rsplit('[', 1)
+        el_type, el_len, el_align = get_type(element_s)
+        if num:  # array
+            arr_len = int(num)
+            aligned_arr_len = align(el_len, el_align) * (arr_len-1) + el_len
+            ret = data.ArrayDataType(el_type, arr_len, el_len), aligned_arr_len, el_align
+        else: # slice
+            ret = make_slice(el_type, element_s), 3 * ptr_size, ptr_size
+    elif s in prog_definitions['Interfaces']:
+        ret = go_iface, 2 * ptr_size, ptr_size
+    elif s in prog_definitions['Structs']:
+        ret = get_struct(s)
+    else:
+        for k in ('Types', 'Aliases'):
+            if s in prog_definitions[k]:
+                ret = get_type(prog_definitions[k][s])
+                break
+        else:
+            raise Exception('unknown type {}'.format(s))
+
+    type_map[s] = ret
+    return ret
+
+
+struct_defs = {}
+
+
+# TODO ensure it works with types with looping references
+def get_struct(name):
+    if name in struct_defs:
+        return struct_defs[name]
+
+    struct_t = data.StructureDataType(name, 0)
+    struct_defs[name] = struct_t
+
+    fields = [
+        (get_type(field['DataType']), field['Name'])
+        for field in prog_definitions['Structs'][name]['Fields']
+    ]
+
+    if not fields:
+        return struct_t, 0, 1
+
+    current_offset = 0
+    alignment = max(field[0][2] for field in fields)
+
+    for ((field_t, field_size, field_align), field_name) in fields:
+        field_offset = align(current_offset, field_align)
+        new_offset = field_offset + field_size
+        struct_t.growStructure(new_offset - current_offset)
+        current_offset = new_offset
+        struct_t.insertAtOffset(field_offset, field_t, field_size, field_name, None)
+
+    # required padding byte for non-empty structs
+    struct_t.growStructure(1)
+    struct_t.insertAtOffset(current_offset, data.ByteDataType, 1, '_padding_byte', None)
+    current_offset += 1
+
+    return struct_t, current_offset, alignment
+
 
 # for dynamically created struct types; see below
 dynamic_type_map = {}
+
 
 # Ghidra expects functions to only return a single value, however,
 # Go allows multiple types to be returned. To facilitate this,
@@ -156,14 +228,15 @@ dynamic_type_map = {}
 # in registers or on the stack
 # TODO handle params partially passed on the stack, partially in registers
 def get_dynamic_type(types):
-    name = '_'.join(chain(['go_dynamic'], types))
+    name = 'go_dynamic_' + '+'.join(types)
     if name in dynamic_type_map:
         return dynamic_type_map[name]
 
     t = data.StructureDataType(name, 0)
     for i, typename in enumerate(types):
-        element_type = get_type(typename)
-        t.add(element_type, element_type.getLength(), 'elem_{}'.format(i), None)
+        el_type, el_size, _el_align = get_type(typename)
+        el_name = 'elem_{}_{}'.format(i + 1, typename)
+        t.add(el_type, el_size, el_name, None)
 
     dynamic_type_map[name] = t
     return t
@@ -176,150 +249,185 @@ def functions_iter():
         yield func
         func = getFunctionAfter(func)
 
+
 # attempts to assign each data type given in the iterable `types`
 # (for handling composite types like structs) into registers
 # if all given types do not fit into registers, returns None,
 # otherwise returns a list of the used registers for the given datatype
-def assign_registers(int_registers, float_registers, types):
+def assign_registers(I, FP, datatype):
     # clone + reverse for .pop() and .append()
-    int_registers = int_registers[::-1]
-    float_registers = float_registers[::-1]
+    current_int_registers = [regmap[reg] for reg in integer_registers[I:][::-1]]
+    current_float_registers = [regmap[reg] for reg in float_registers[FP:][::-1]]
     out = []
 
-    for t in types:
+    for t in recursive_struct_unpack(datatype):
+        if isinstance(t, data.ArrayDataType):
+            # "If T is an array type of length > 1, fail."
+            return None
+        if isinstance(t, data.AbstractFloatDataType):
+            registers = current_float_registers
+        else:
+            registers = current_int_registers
+
+        if len(registers) == 0:
+            return None
         t_len = t.getLength()
-        while t_len:  # allocate parts of
-            if isinstance(t, data.AbstractFloatDataType):
-                registers = float_registers
-            else:
-                registers = int_registers
 
-            if len(registers) == 0:
-                return None
-
+        while True:
             reg = registers.pop()
             reg_len = reg.getBitLength() >> 3
-            if reg_len <= t_len:  # fits at least partially into the register
+            if reg_len < t_len:
+                raise Exception(t)
+            if reg_len == t_len:  # fits at least partially into the register
                 out.append(reg)
-                t_len -= reg_len
-            else:  # register is too big, get smaller-sized "child register"
-                registers.append(reg.getChildRegisters()[0])
+                if registers is current_int_registers:
+                    I += 1
+                else:
+                    FP += 1
+                break
+            # register is too big, get smaller-sized "child register"
+            registers.append(reg.getChildRegisters()[0])
 
-    return out
+    return out, I, FP
+
+
+# assign to registers or stack
+def assign_type(type_name, I, FP, stack_offset):
+    datatype, el_size, el_align = get_type(type_name)
+    if el_size == 0:
+        # "If T has zero size, add T to the stack sequence S and return."
+        return VariableStorage(currentProgram, stack_offset, 0), datatype, I, FP, stack_offset
+    # "Try to register-assign V."
+    reg_info = assign_registers(I, FP, datatype)
+    if reg_info is None:  # assign to stack
+        # "If step 3 failed, [...] add T to the stack sequence S"
+        el_offset = align(stack_offset, el_align)
+        storage = [el_offset, el_size]
+        stack_offset = el_offset + el_size
+    else:  # assign to register
+        storage, I, FP = reg_info
+
+    return VariableStorage(currentProgram, *storage), datatype, I, FP, stack_offset
+
+
 
 # takes a list of strings as argument and attempts to assign
 # the types into parameters; returns a list of ParameterImpl values
 # with the datatypes and parameter storage if successful, and None
 # if it fails
 def get_params(param_types):
-    # TODO structs currently unhandled
-    if 'struct' in param_types:
-        return None
-
-    # keep track of currently used and available registers
-    remaining_int_registers, remaining_float_registers = (
-        [registers[name] for name in reglist]
-        for reglist in (integer_registers, float_registers)
-    )
-
     result_params = []
+    stack_offset = 0
+    I = 0
+    FP = 0
 
     for param in param_types:
-        datatype = get_type(param)
-
-        types = recursive_struct_unpack(datatype)
-
-        assigned = assign_registers(remaining_int_registers, remaining_float_registers, types)
-        if assigned is None:
-            return None
-
-        # TODO currently amd64-specific, not all platforms may use vector storage for this
-        # when fixing, ensure child registers work too, e.g XMM0's child register XMM0Q or RAX's child EAX
-        #
-        #  count number of integer and float registers used by the assignment and remove from available registers
-        float_reg_num = sum(1 for reg in assigned if reg.getTypeFlags() & reg.TYPE_VECTOR)
-        int_reg_num = len(assigned) - float_reg_num
-
-        remaining_int_registers = remaining_int_registers[int_reg_num:]
-        remaining_float_registers = remaining_float_registers[float_reg_num:]
-
-        storage = VariableStorage(currentProgram, *assigned)
+        storage, datatype, I, FP, stack_offset = assign_type(param['DataType'], I, FP, stack_offset)
 
         result_params.append(ParameterImpl(
-            'parameter_{}'.format(len(result_params) + 1),
+            param['Name'],
             datatype,
             storage,
             currentProgram,
         ))
 
-    return result_params
+    return result_params, stack_offset
+
 
 # same as get_params, but for return values; as only a single return value is handled by Ghidra,
 # returns a dynamically generated struct type with similar storage characteristics
-def get_results(result_types):
-    # TODO structs currently unhandled
-    if 'struct' in result_types:
-        return None
-
+def get_results(result_types, stack_offset):
     # special-case for no return type
     if len(result_types) == 0:
         return data.VoidDataType(), VariableStorage.VOID_STORAGE
 
-    remaining_int_registers, remaining_float_registers = (
-        [registers[name] for name in reglist]
-        for reglist in (integer_registers, float_registers)
-    )
+    I = 0
+    FP = 0
+    varnodes = []
 
     if len(result_types) == 1:
-        datatype = get_type(result_types[0])
+        ret_datatype = get_type(result_types[0]['DataType'])
     else:
-        datatype = get_dynamic_type(result_types)
+        ret_datatype = get_dynamic_type(result['DataType'] for result in result_types)
 
-    types = recursive_struct_unpack(datatype)
-    assigned = assign_registers(remaining_int_registers, remaining_float_registers, types)
-    if assigned is None:
-        return None
+    for param in result_types:
+        storage, datatype, I, FP, stack_offset = assign_type(param['DataType'], I, FP, stack_offset)
+        varnodes.extend(storage.getVarnodes())
 
-    storage = VariableStorage(currentProgram, *assigned)
+    print(varnodes)
+    storage = VariableStorage(currentProgram, *varnodes)
 
-    return datatype, storage
+    return ret_datatype, storage
 
 
 # these need to be parsed together, because the stack positioning
 # of the parameters affects the stack positioning of the results
-def get_storage(param_types, result_types):
-    pass
+def set_storage(func, param_types, result_types):
+    # "For each argument A of F, assign A."
+    params, stack_offset = get_params(param_types)
+    # "Add a pointer-alignment field to S"
+    stack_offset = align(stack_offset, ptr_size)
+    # "For each result R of F, assign R"
+    ret_datatype, ret_storage = get_results(result_types, stack_offset)
+
+    func.replaceParameters(FunctionUpdateType.CUSTOM_STORAGE, True, SourceType.USER_DEFINED, *params)
+    print('ret_datatype={}'.format(ret_datatype))
+    func.setReturn(ret_datatype, ret_storage, SourceType.USER_DEFINED)
 
 
-# recursively unpack types into component types
+# recursively unpack types into component types for register assignment
 # just yields a single type for a non-composite type,
 # and recursively yields each component type of each component type
 # for structs
 def recursive_struct_unpack(datatype):
-    if not isinstance(datatype, data.StructureDataType):
-        yield datatype
+    if isinstance(datatype, data.StructureDataType):
+        for component in datatype.getDefinedComponents():
+            # no `yield from` in py2
+            for v in recursive_struct_unpack(component.getDataType()):
+                yield v
         return
 
-    for component in datatype.getDefinedComponents():
-        # no `yield from` in py2
-        for v in recursive_struct_unpack(component.getDataType()):
-            yield v
+    if isinstance(datatype, data.ArrayDataType):
+        num_elements = datatype.getNumElements()
+        # "If T is an array type of length 0, do nothing."
+        # "If T is an array type of length 1, recursively register-assign
+        # its one element."
+        if num_elements < 2:
+            if num_elements == 1:
+                yield datatype.getDataType()
+            return
+    # "If T is a complex type, recursively register-assign
+    # its real and imaginary parts."
+    elif isinstance(datatype, data.AbstractComplexDataType):
+        if isinstance(datatype, data.Complex16DataType):
+            float_t = data.Float8DataType
+        else:
+            float_t = data.Float4DataType
+        yield float_t()
+        yield float_t()
+        return
+    # "If T is an integral type that fits in two integer registers,
+    # assign the least significant and most significant halves of V
+    # to registers I and I+1"
+    elif ptr_size == 4 and isinstance(datatype, (data.QWordDataType, data.SignedQWordDataType)):
+        if isinstance(datatype, data.QWordDataType):
+            half_num_t = data.DWordDataType
+        else:
+            half_num_t = data.SignedDWordDataType
+        yield half_num_t()
+        yield half_num_t()
+        return
+
+    yield datatype
 
 
 def main():
+    signatures = prog_definitions['Funcs']
     for func in functions_iter():
-        signature = funcmap.get(func.name)
-        if signature is None:
-            continue
-
-        arguments = get_params(signature['Params'])
-        if arguments is not None:
-            func.replaceParameters(FunctionUpdateType.CUSTOM_STORAGE, True, SourceType.USER_DEFINED, *arguments)
-
-        results = get_results(signature['Results'])
-        if results is not None:
-            datatype, storage = results
-            func.setReturn(datatype, storage, SourceType.USER_DEFINED)
+        signature = signatures.get(func.name)
+        if signature:
+            print(func.name)
+            set_storage(func, signature['Params'], signature['Results'])
 
 
 main()
