@@ -726,11 +726,10 @@ func (pkg *pkgData) parseType(obj *types.TypeName) {
 		doPanic := false
 		switch elT := t.Elem().(type) {
 		case *types.Struct:
-			if elT.NumFields() == 0 {
+			doPanic = elT.NumFields() != 0
+			if !doPanic {
 				// *struct{}
 				pkg.Types[name] = typeData{Underlying: "byte*"}
-			} else {
-				doPanic = true
 			}
 		case *types.Basic:
 			pkg.Types[name] = typeData{Underlying: elT.Name() + "*"}
