@@ -8,6 +8,7 @@ import os.path
 from ghidra.program.model.listing import VariableStorage, ParameterImpl
 from ghidra.program.model.symbol import SourceType
 from ghidra.program.model.listing.Function import FunctionUpdateType
+from ghidra.program.model.pcode import Varnode
 
 from ghidra.program.model import data
 
@@ -78,6 +79,10 @@ go_error.add(go_iface, ptr_size * 2, 'iface', None)
 integer_registers = ['RAX', 'RBX', 'RCX', 'RDI', 'RSI', 'R8', 'R9', 'R10', 'R11']
 float_registers = ['XMM{}'.format(i) for i in range(15)]
 
+#space = currentProgram.getAddressFactory().getUniqueSpace()
+#space = ghidra.program.model.address.AddressSpace.OTHER_SPACE
+space = currentProgram.getRegister(integer_registers[0]).getAddressSpace()
+
 # map name string, e.g "RAX", to Ghidra register object corresponding to the register
 # https://ghidra.re/ghidra_docs/api/ghidra/program/model/lang/Register.html
 regmap = {
@@ -91,6 +96,7 @@ builtins_map = {
     'iface': lambda: go_iface,
     'bool': data.BooleanDataType,
     'byte': data.ByteDataType,
+    'rune': data.SignedDWordDataType,
     'complex128': data.Complex16DataType,
     'complex64': data.Complex8DataType,
     'float32': data.Float4DataType,
@@ -269,9 +275,13 @@ def assign_registers(I, FP, datatype):
     # clone + reverse for .pop() and .append()
     current_int_registers = [regmap[reg] for reg in integer_registers[I:][::-1]]
     current_float_registers = [regmap[reg] for reg in float_registers[FP:][::-1]]
+    padding_size = 0
     out = []
 
     for t in recursive_struct_unpack(datatype):
+        if isinstance(t, data.DefaultDataType):
+            padding_size += 1
+            continue
         if isinstance(t, data.ArrayDataType):
             # "If T is an array type of length > 1, fail."
             return None
@@ -290,7 +300,7 @@ def assign_registers(I, FP, datatype):
             if reg_len < t_len:
                 raise Exception(t)
             if reg_len == t_len:  # fits at least partially into the register
-                out.append(reg)
+                out.append(Varnode(reg.getAddress(), reg.getBitLength() >> 3))
                 if registers is current_int_registers:
                     I += 1
                 else:
@@ -298,6 +308,8 @@ def assign_registers(I, FP, datatype):
                 break
             # register is too big, get smaller-sized "child register"
             registers.append(reg.getChildRegisters()[0])
+    if padding_size > 0:
+        out.append(Varnode(space.getAddress(0x10000), padding_size))
 
     return out, I, FP
 
@@ -376,14 +388,19 @@ def get_results(result_types, stack_offset):
 # of the parameters affects the stack positioning of the results
 def set_storage(func, param_types, result_types):
     # "For each argument A of F, assign A."
-    params, stack_offset = get_params(param_types)
+    try:
+        params, stack_offset = get_params(param_types)
+        func.replaceParameters(FunctionUpdateType.CUSTOM_STORAGE, True, SourceType.USER_DEFINED, *params)
     # "Add a pointer-alignment field to S"
-    stack_offset = align(stack_offset, ptr_size)
+        stack_offset = align(stack_offset, ptr_size)
+    except:
+        return
     # "For each result R of F, assign R"
-    ret_datatype, ret_storage = get_results(result_types, stack_offset)
-
-    func.replaceParameters(FunctionUpdateType.CUSTOM_STORAGE, True, SourceType.USER_DEFINED, *params)
-    func.setReturn(ret_datatype, ret_storage, SourceType.USER_DEFINED)
+    try:
+        ret_datatype, ret_storage = get_results(result_types, stack_offset)
+        func.setReturn(ret_datatype, ret_storage, SourceType.USER_DEFINED)
+    except:
+        print(e)
 
 
 # recursively unpack types into component types for register assignment
@@ -392,21 +409,19 @@ def set_storage(func, param_types, result_types):
 # for structs
 def recursive_struct_unpack(datatype):
     if isinstance(datatype, data.StructureDataType):
-        for component in datatype.getDefinedComponents():
+        for component in datatype.getComponents():
             # no `yield from` in py2
             for v in recursive_struct_unpack(component.getDataType()):
                 yield v
-        return
-
-    if isinstance(datatype, data.ArrayDataType):
+    elif isinstance(datatype, data.ArrayDataType):
         num_elements = datatype.getNumElements()
         # "If T is an array type of length 0, do nothing."
         # "If T is an array type of length 1, recursively register-assign
         # its one element."
-        if num_elements < 2:
-            if num_elements == 1:
-                yield datatype.getDataType()
-            return
+        if num_elements >= 2:
+            yield datatype
+        elif num_elements == 1:
+            yield datatype.getDataType()
     # "If T is a complex type, recursively register-assign
     # its real and imaginary parts."
     elif isinstance(datatype, data.AbstractComplexDataType):
@@ -416,7 +431,6 @@ def recursive_struct_unpack(datatype):
             float_t = data.Float4DataType
         yield float_t()
         yield float_t()
-        return
     # "If T is an integral type that fits in two integer registers,
     # assign the least significant and most significant halves of V
     # to registers I and I+1"
@@ -427,9 +441,8 @@ def recursive_struct_unpack(datatype):
             half_num_t = data.SignedDWordDataType
         yield half_num_t()
         yield half_num_t()
-        return
-
-    yield datatype
+    else:
+        yield datatype
 
 
 def main():
