@@ -986,18 +986,13 @@ func pkgParse(inCh <-chan string, outCh chan<- map[string]*packages.Package, cha
 
 		var deletedKeys []string
 		for key, astPkg := range astPkgs {
-			if strings.HasSuffix(astPkg.Name, "_test") || astPkg.Name == "builtin" || astPkg.Name == "main" {
+			if strings.HasSuffix(astPkg.Name, "_test") || astPkg.Name == "builtin" {
 				deletedKeys = append(deletedKeys, key)
 			}
 		}
 
 		for _, key := range deletedKeys {
 			delete(astPkgs, key)
-		}
-
-		if len(astPkgs) > 1 {
-			fmt.Println(len(astPkgs), astPkgs)
-			panic(path)
 		}
 
 		for _, astPkg := range astPkgs {
