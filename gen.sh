@@ -21,6 +21,8 @@ setup_fake_goroot() {
 }
 
 main() {
+	# ensure latest code is being used
+	go build
 	setup_fake_goroot
 	trap cleanup_fake_goroot EXIT
 	export GOROOT="$fake_goroot"

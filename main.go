@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/mod/semver"
 	"golang.org/x/tools/go/packages"
+	"golang.org/x/tools/go/types/typeutil"
 )
 
 /* TODO parse:
@@ -756,7 +757,7 @@ func (pkg *pkgData) parseType(obj *types.TypeName) {
 func selfMethod(objT types.Type, f types.Object) bool {
 	recvT := f.Type().(*types.Signature).Recv().Type()
 
-	return types.Identical(recvT, objT)
+	return types.Identical(recvT, objT) || types.Identical(recvT, types.NewPointer(objT))
 }
 
 func (pkg *pkgData) parseMethod(method types.Object) {
@@ -832,6 +833,7 @@ func (pkg *pkgData) getTypeName(iface types.Type, name string) string {
 	case *types.Chan:
 		return "chan"
 	case *types.Struct:
+		// need name here to uniquely identify this anonymous struct
 		if name == "" {
 			panic(iface)
 		}
@@ -845,29 +847,11 @@ func (pkg *pkgData) getTypeName(iface types.Type, name string) string {
 
 func (pkg *pkgData) parseMethods(obj *types.TypeName) {
 	objT := obj.Type()
-	methods := types.NewMethodSet(objT)
-	numMethods := methods.Len()
-	handledMethodNames := make(map[string]bool, numMethods)
-
-	for i := 0; i < numMethods; i++ {
-		method := methods.At(i).Obj()
-		handledMethodNames[method.Name()] = true
-		if !selfMethod(objT, method) {
-			continue // comes from embedded field
+	for _, method := range typeutil.IntuitiveMethodSet(obj.Type(), nil) {
+		methodO := method.Obj()
+		if selfMethod(objT, methodO) {
+			pkg.parseMethod(methodO)
 		}
-		pkg.parseMethod(method)
-	}
-
-	pObjT := types.NewPointer(objT)
-	pMethods := types.NewMethodSet(pObjT)
-	numPMethods := pMethods.Len()
-
-	for i := 0; i < numPMethods; i++ {
-		method := pMethods.At(i).Obj()
-		if handledMethodNames[method.Name()] || !selfMethod(pObjT, method) {
-			continue // already handled or from embedded field
-		}
-		pkg.parseMethod(method)
 	}
 }
 
@@ -1004,38 +988,12 @@ func pkgParse(inCh <-chan string, outCh chan<- map[string]*packages.Package, cha
 	chanClose.Do(func() { close(outCh) })
 }
 
-func uniqPkgs(root *types.Package) <-chan *types.Package {
-	ch := make(chan *types.Package)
-	go func() {
-		seen := make(map[string]bool)
-		var stk stack[*types.Package]
-		stk.push(root)
-
-		for {
-			pkg, ok := stk.pop()
-			if !ok {
-				break
-			}
-			path := pkg.Path()
-			if seen[path] {
-				continue
-			}
-			ch <- pkg
-			seen[path] = true
-			stk.pushMultipleRev(pkg.Imports())
-		}
-		close(ch)
-	}()
-
-	return ch
-}
-
 func pkgExtract(inCh <-chan map[string]*packages.Package, outCh chan<- map[string]*pkgData, chanClose *sync.Once, wg *sync.WaitGroup) {
 	for pkgMap := range inCh {
 		pkgArchs := make(map[string]*pkgData)
 		for pkgArch, pkg := range pkgMap {
 			pkgD := newPkgData()
-			for pkgDef := range uniqPkgs(pkg.Types) {
+			for _, pkgDef := range typeutil.Dependencies(pkg.Types) {
 				scope := pkgDef.Scope()
 				names := scope.Names()
 				for _, name := range names {
