@@ -9,8 +9,29 @@ class MockGhidraDataType:
     def __call__(self) -> 'MockGhidraDataType':
         return self
 
-    def getLength(self) -> int:  # noqa: N802
+    def __init__(self, size):
+        self.size = size
+
+    def __eq__(self, other):
+        if isinstance(other, MockGhidraDataType):
+            return self.size == other.size
+        return False
+
+    def __repr__(self):
+        return f"MockGhidraDataType(size={self.size})"
+
+    def getLength(self):
         return self.size
+
+    def isInteger(self):
+        return self.size in [1, 2, 4, 8]
+
+    def isFloat(self):
+        return False
+
+
+"""     def getLength(self) -> int:  # noqa: N802
+        return self.size """
 
 
 @dataclass

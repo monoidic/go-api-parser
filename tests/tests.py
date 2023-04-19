@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import unittest
-
 import data
 from mocked_ghidra import MockGhidraRegister, VariableStorage, ParameterImpl
 
@@ -130,6 +129,10 @@ class TestRegisterOnly(unittest.TestCase):
             params = get_params(param_types)
             self.assertIsNotNone(params)
             self.assertEqual(expected, params)
+            print("Expected:")
+            print(expected)
+            print("Actual:")
+            print(params)
 
 
 if __name__ == '__main__':
