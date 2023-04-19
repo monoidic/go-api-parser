@@ -12,9 +12,6 @@ class MockGhidraDataType:
     def getLength(self) -> int:  # noqa: N802
         return self.size
 
-    def __hash__(self):
-        return hash((self.name, self.bit_length))
-
 
 @dataclass
 class MockedGhidraAbstractFloatDataType(MockGhidraDataType):
@@ -22,11 +19,6 @@ class MockedGhidraAbstractFloatDataType(MockGhidraDataType):
 
 
 Undefined1DataType = MockGhidraDataType(1)
-
-
-@dataclass
-class AbstractFloatDataType(MockedGhidraAbstractFloatDataType):
-    pass
 
 
 @dataclass

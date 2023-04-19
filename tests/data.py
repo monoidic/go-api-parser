@@ -1,121 +1,37 @@
-from dataclasses import dataclass, field
-from typing import Optional, Any
+from functools import partial
 
+from mocked_ghidra import MockGhidraDataType, MockGhidraPointerType
+from mocked_ghidra import Undefined1DataType as _Undefined1DataType
+from mocked_ghidra import MockGhidraStructureType
+from mocked_ghidra import MockGhidraVoidDatatype
+from mocked_ghidra import MockedGhidraAbstractFloatDataType
+from mocked_ghidra import MockGhidraArrayDataType
 
-@dataclass
-class MockGhidraDataType:
-    size: int
+AbstractFloatDataType = MockedGhidraAbstractFloatDataType
+StructureDataType = MockGhidraStructureType
+VoidDataType = MockGhidraVoidDatatype
+ArrayDataType = MockGhidraArrayDataType
 
-    def __call__(self) -> 'MockGhidraDataType':
-        return self
+BooleanDataType = MockGhidraDataType(1)
+ByteDataType = MockGhidraDataType(1)
+SignedByteDataType = MockGhidraDataType(1)
 
-    def getLength(self) -> int:  # noqa: N802
-        return self.size
+Complex16DataType = MockGhidraDataType(16)
+Complex8DataType = MockGhidraDataType(8)
 
-    def __hash__(self):
-        return hash((self.name, self.bit_length))
+Float4DataType = AbstractFloatDataType(4)
+Float8DataType = AbstractFloatDataType(8)
 
+SignedWordDataType = MockGhidraDataType(2)
+SignedDWordDataType = MockGhidraDataType(4)
+SignedQWordDataType = MockGhidraDataType(8)
 
-@dataclass
-class MockedGhidraAbstractFloatDataType(MockGhidraDataType):
-    pass
+WordDataType = MockGhidraDataType(2)
+DWordDataType = MockGhidraDataType(4)
+QWordDataType = MockGhidraDataType(8)
 
+Undefined8DataType = MockGhidraDataType(8)
+Undefined1DataType = _Undefined1DataType
 
-Undefined1DataType = MockGhidraDataType(1)
-
-
-@dataclass
-class AbstractFloatDataType(MockedGhidraAbstractFloatDataType):
-    pass
-
-
-@dataclass
-class MockGhidraPointerType(MockGhidraDataType):
-    reference_type: MockGhidraDataType = field(default_factory=Undefined1DataType)  # noqa:E501
-
-
-@dataclass
-class MockGhidraStructureMemberType(MockGhidraDataType):
-    data_type: MockGhidraDataType
-    name: str
-
-    def getDataType(self) -> MockGhidraDataType:  # noqa:N802
-        return self.data_type
-
-
-@dataclass
-class MockGhidraStructureType(MockGhidraDataType):
-    name: str
-    members: list[MockGhidraStructureMemberType] = field(default_factory=list)
-
-    def __init__(self, name: str, size: int) -> None:
-        super().__init__(size)
-        self.name = name
-        self.members: list[MockGhidraStructureMemberType] = []
-
-    def add(self, data_type: MockGhidraDataType, _length: int,
-            component_name: str, _comment: Optional[str]) -> None:
-        member = MockGhidraStructureMemberType(
-            data_type.size,
-            data_type,
-            component_name,
-        )
-        self.members.append(member)
-        self.size += member.size
-
-    def getDefinedComponents(self) -> list[MockGhidraStructureMemberType]:  # noqa:N802,E501
-        return self.members
-
-
-@dataclass
-class MockGhidraRegister:
-    name: str
-    size: int
-    children_map: dict[str, 'MockGhidraRegister'] = field(repr=False)
-    TYPE_VECTOR = 1
-
-    def getChildRegisters(self) -> list['MockGhidraRegister']:  # noqa:N802
-        child = self.children_map.get(self.name)
-        return [child] if child else []
-
-    def getBitLength(self) -> int:  # noqa:N802
-        return self.size * 8
-
-    def getTypeFlags(self) -> int:  # noqa:N802
-        return self.TYPE_VECTOR if self.name.startswith('XMM') else 0
-
-
-_void = object()
-
-
-@dataclass
-class VariableStorage:
-    storage: tuple[Any, ...]
-    VOID_STORAGE = _void
-
-    def __init__(self, _program: None, *args: Any):
-        self.storage = args
-
-
-@dataclass
-class MockGhidraVoidDatatype:
-    def __call__(self) -> 'MockGhidraVoidDatatype':
-        return self
-
-
-@dataclass
-class ParameterImpl:
-    name: str
-    datatype: MockGhidraDataType
-    storage: VariableStorage
-    _program: None = field(repr=False, default=None)
-
-
-@dataclass
-class MockGhidraArrayDataType:
-    data_type: MockGhidraDataType
-    array_length: int
-    element_length: int
-
-    def getLength(self) -> int:
-        return self.array_length * self.element_length
+Pointer32DataType = partial(MockGhidraPointerType, 4)
+Pointer64DataType = partial(MockGhidraPointerType, 8)
