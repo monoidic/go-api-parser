@@ -17,16 +17,11 @@ import (
 
 	"golang.org/x/mod/semver"
 	"golang.org/x/tools/go/packages"
+	"golang.org/x/tools/go/types/typeutil"
 )
 
 /* TODO parse:
-* extract data that is specific to just an architecture, e.g amd64 or arm64, or
-  an OS, e.g windows or linux (including "unix" meta OS), and appears in all of them,
-  but does not appear in "all", and extract them out for additional deduplication
-
-* extract types from modules (*only* extract types which appear in function signatures?)
-
-* data dedup leaves empty objects behind?
+* more/better dedup groups in archSplit?
 
   * handle type aliased structs, e.g internal/fuzz.CorpusEntry, better,
   instead of creating a bunch of anonymous struct definitions everywhere they appear
@@ -190,25 +185,38 @@ func getArchitectures() (out []string) {
 	return out
 }
 
-type dirStack struct {
-	l []string
+type stack[T any] struct {
+	l []T
 }
 
-func (s *dirStack) pushMultiple(l []string) {
-	// reverse sorted order, to pop in sorted order (not important)
-	// sort.Slice(l, func(i, j int) bool { return l[j] < l[i] })
+func (s *stack[T]) pushMultipleRev(l []T) {
+	// reverse sorted order, to pop in "the right" order
+	reverseSlice(l)
 	s.l = append(s.l, l...)
 }
 
-func (s *dirStack) pop() (string, bool) {
+func (s *stack[T]) push(e T) {
+	s.l = append(s.l, e)
+}
+
+func reverseSlice[T any](l []T) {
+	length := len(l)
+	for i := 0; i < length/2; i++ {
+		j := length - i - 1
+		l[i], l[j] = l[j], l[i]
+	}
+}
+
+func (s *stack[T]) pop() (T, bool) {
+	var top T
 	size := len(s.l)
 	if size == 0 {
-		return "", false
+		return top, false
 	}
 
-	dir := s.l[size-1]
+	top = s.l[size-1]
 	s.l = s.l[:size-1]
-	return dir, true
+	return top, true
 }
 
 func getBuildConstraints() map[string]map[string]bool {
@@ -248,7 +256,8 @@ var filteredDirs = map[string]bool{
 
 func dirwalk(ch chan<- string) {
 
-	st := dirStack{l: []string{"."}}
+	var st stack[string]
+	st.push(".")
 
 	for {
 		root, success := st.pop()
@@ -269,7 +278,7 @@ func dirwalk(ch chan<- string) {
 			}
 		}
 
-		st.pushMultiple(subdirs)
+		st.pushMultipleRev(subdirs)
 	}
 }
 
@@ -589,19 +598,27 @@ func (x alias) equals(yI equalsI) bool {
 	return x == yI.(alias)
 }
 
-type pkgData struct {
-	Funcs   map[string]funcData
-	Types   map[string]typeData
-	Structs map[string]structDef
-	Aliases map[string]alias
+type iface struct{}
+
+func (x iface) equals(yI equalsI) bool {
+	return x == yI.(iface)
 }
 
-func newPkgData() pkgData {
-	return pkgData{
-		Funcs:   make(map[string]funcData),
-		Types:   make(map[string]typeData),
-		Structs: make(map[string]structDef),
-		Aliases: make(map[string]alias),
+type pkgData struct {
+	Funcs      map[string]funcData
+	Types      map[string]typeData
+	Structs    map[string]structDef
+	Aliases    map[string]alias
+	Interfaces map[string]iface
+}
+
+func newPkgData() *pkgData {
+	return &pkgData{
+		Funcs:      make(map[string]funcData),
+		Types:      make(map[string]typeData),
+		Structs:    make(map[string]structDef),
+		Aliases:    make(map[string]alias),
+		Interfaces: make(map[string]iface),
 	}
 }
 
@@ -620,12 +637,13 @@ func mapAnd[V equalsI](x, y map[string]V) map[string]V {
 }
 
 // get pkgData with definitions existing in both x and y
-func (x pkgData) and(y pkgData) pkgData {
-	return pkgData{
-		Funcs:   mapAnd(x.Funcs, y.Funcs),
-		Types:   mapAnd(x.Types, y.Types),
-		Structs: mapAnd(x.Structs, y.Structs),
-		Aliases: mapAnd(x.Aliases, y.Aliases),
+func (pkg *pkgData) and(y *pkgData) *pkgData {
+	return &pkgData{
+		Funcs:      mapAnd(pkg.Funcs, y.Funcs),
+		Types:      mapAnd(pkg.Types, y.Types),
+		Structs:    mapAnd(pkg.Structs, y.Structs),
+		Aliases:    mapAnd(pkg.Aliases, y.Aliases),
+		Interfaces: mapAnd(pkg.Interfaces, y.Interfaces),
 	}
 }
 
@@ -635,11 +653,12 @@ func mapMerge[T any](x, y map[string]T) {
 	}
 }
 
-func (x pkgData) merge(y pkgData) {
-	mapMerge(x.Funcs, y.Funcs)
-	mapMerge(x.Types, y.Types)
-	mapMerge(x.Structs, y.Structs)
-	mapMerge(x.Aliases, y.Aliases)
+func (pkg *pkgData) merge(y *pkgData) {
+	mapMerge(pkg.Funcs, y.Funcs)
+	mapMerge(pkg.Types, y.Types)
+	mapMerge(pkg.Structs, y.Structs)
+	mapMerge(pkg.Aliases, y.Aliases)
+	mapMerge(pkg.Interfaces, y.Interfaces)
 }
 
 func mapNot[T any](x, y map[string]T) {
@@ -648,19 +667,20 @@ func mapNot[T any](x, y map[string]T) {
 	}
 }
 
-func (x pkgData) not(y pkgData) {
-	mapNot(x.Funcs, y.Funcs)
-	mapNot(x.Types, y.Types)
-	mapNot(x.Structs, y.Structs)
-	mapNot(x.Aliases, y.Aliases)
+func (pkg *pkgData) not(y *pkgData) {
+	mapNot(pkg.Funcs, y.Funcs)
+	mapNot(pkg.Types, y.Types)
+	mapNot(pkg.Structs, y.Structs)
+	mapNot(pkg.Aliases, y.Aliases)
+	mapNot(pkg.Interfaces, y.Interfaces)
 }
 
-func (x pkgData) empty() bool {
-	return (len(x.Funcs) + len(x.Types) + len(x.Structs) + len(x.Aliases)) == 0
+func (pkg *pkgData) empty() bool {
+	return (len(pkg.Funcs) + len(pkg.Types) + len(pkg.Structs) + len(pkg.Aliases) + len(pkg.Interfaces)) == 0
 }
 
 // also handle methods
-func parseFunc(obj *types.Func, pkg pkgData) {
+func (pkg *pkgData) parseFunc(obj *types.Func) {
 	signature := obj.Type().(*types.Signature)
 	// do not handle generic functions
 	if signature.TypeParams() != nil {
@@ -670,15 +690,15 @@ func parseFunc(obj *types.Func, pkg pkgData) {
 	name := obj.FullName()
 
 	pkg.Funcs[name] = funcData{
-		Params:  tupToSlice(signature.Params(), name+"|param", pkg),
-		Results: tupToSlice(signature.Results(), name+"|result", pkg),
+		Params:  pkg.tupToSlice(signature.Params(), name+"|param"),
+		Results: pkg.tupToSlice(signature.Results(), name+"|result"),
 	}
 }
 
-func parseType(obj *types.TypeName, pkg pkgData) {
+func (pkg *pkgData) parseType(obj *types.TypeName) {
+	name := fmt.Sprintf("%s.%s", obj.Pkg().Path(), obj.Name())
 	if obj.IsAlias() {
-		name := fmt.Sprintf("%s.%s", obj.Pkg().Path(), obj.Name())
-		pkg.Aliases[name] = alias{Target: getTypeName(obj.Type(), name, pkg)}
+		pkg.Aliases[name] = alias{Target: pkg.getTypeName(obj.Type(), name)}
 		return
 	}
 
@@ -698,36 +718,38 @@ func parseType(obj *types.TypeName, pkg pkgData) {
 
 	switch t := named.Underlying().(type) {
 	case *types.Struct:
-		parseStruct(getTypeName(obj.Type(), "", pkg), t, pkg)
+		pkg.parseStruct(pkg.getTypeName(obj.Type(), ""), t)
 	case *types.Interface:
 		isInterface = true
 	case *types.Basic:
-		pkg.Types[getTypeName(obj.Type(), "", pkg)] = typeData{Underlying: getTypeName(t, "", pkg)}
+		pkg.Types[pkg.getTypeName(obj.Type(), "")] = typeData{Underlying: pkg.getTypeName(t, "")}
 	case *types.Pointer:
 		doPanic := false
 		switch elT := t.Elem().(type) {
 		case *types.Struct:
-			// *struct{}
 			doPanic = elT.NumFields() != 0
+			if !doPanic {
+				// *struct{}
+				pkg.Types[name] = typeData{Underlying: "byte*"}
+			}
 		case *types.Basic:
-			// runtime/defs_aix_ppc64.go: type pthread_attr *byte
-			// old runtime versions: runtime/os_windows.go type stdFunction *byte
-			doPanic = !(elT.Kind() == types.Byte && (named.Obj().Name() == "pthread_attr" || named.Obj().Name() == "stdFunction"))
+			pkg.Types[name] = typeData{Underlying: elT.Name() + "*"}
 		default:
 			doPanic = true
 		}
 		if doPanic {
 			panic(fmt.Sprintf("pkg %s, type %s", named.Obj().Pkg().Path(), named))
 		}
-	case *types.Array, *types.Slice, *types.Signature, *types.Map, *types.Chan:
-		// nothing
+	case *types.Array, *types.Slice, *types.Map, *types.Chan, *types.Signature:
+		pkg.Types[name] = typeData{Underlying: pkg.getTypeName(t, name)}
 	default:
 		_ = named.Underlying().(*types.Basic)
-		panic(named.Underlying())
 	}
 
-	if !isInterface {
-		parseMethods(obj, pkg)
+	if isInterface {
+		pkg.Interfaces[name] = iface{}
+	} else {
+		pkg.parseMethods(obj)
 	}
 }
 
@@ -735,42 +757,40 @@ func parseType(obj *types.TypeName, pkg pkgData) {
 func selfMethod(objT types.Type, f types.Object) bool {
 	recvT := f.Type().(*types.Signature).Recv().Type()
 
-	return types.Identical(recvT, objT)
+	return types.Identical(recvT, objT) || types.Identical(recvT, types.NewPointer(objT))
 }
 
-func parseMethod(method types.Object, pkg pkgData) {
-	// name format (not returned by f.Id() ):
-	// value receiver: {pkg}.{receiver_type}.{method_name}, e.g main.base.xyzzy
-	// pointer receiver: {pkg}.(*{receiver_type}).{method_name}, e.g main.(*base).xyzzy
-
+func (pkg *pkgData) parseMethod(method types.Object) {
 	signature := method.Type().(*types.Signature)
 	recvT := signature.Recv().Type()
 
 	var recvName string
 
 	if t, ok := recvT.Underlying().(*types.Pointer); ok {
+		// value receiver: {pkg}.{receiver_type}.{method_name}, e.g main.base.xyzzy
 		recvName = fmt.Sprintf("(*%s)", t.Elem().(*types.Named).Obj().Name())
 	} else {
+		// pointer receiver: {pkg}.(*{receiver_type}).{method_name}, e.g main.(*base).xyzzy
 		recvName = recvT.(*types.Named).Obj().Name()
 	}
 
 	name := fmt.Sprintf("%s.%s.%s", method.Pkg().Path(), recvName, method.Name())
 
-	baseParams := tupToSlice(signature.Params(), name+"|param", pkg)
+	baseParams := pkg.tupToSlice(signature.Params(), name+"|param")
 	realParams := make([]namedType, 1, len(baseParams)+1)
 	realParams[0] = namedType{
 		Name:     "self",
-		DataType: getTypeName(recvT, "", pkg),
+		DataType: pkg.getTypeName(recvT, ""),
 	}
 	realParams = append(realParams, baseParams...)
 
 	pkg.Funcs[name] = funcData{
 		Params:  realParams,
-		Results: tupToSlice(signature.Results(), name+"|result", pkg),
+		Results: pkg.tupToSlice(signature.Results(), name+"|result"),
 	}
 }
 
-func tupToSlice(tup *types.Tuple, name string, pkg pkgData) []namedType {
+func (pkg *pkgData) tupToSlice(tup *types.Tuple, name string) []namedType {
 	tupLen := tup.Len()
 	out := make([]namedType, tupLen)
 	for i := 0; i < tupLen; i++ {
@@ -778,18 +798,16 @@ func tupToSlice(tup *types.Tuple, name string, pkg pkgData) []namedType {
 
 		out[i] = namedType{
 			Name:     param.Name(),
-			DataType: getTypeName(param.Type(), fmt.Sprintf("%s_%d", name, i), pkg),
+			DataType: pkg.getTypeName(param.Type(), fmt.Sprintf("%s_%d", name, i)),
 		}
 	}
 
 	return out
 }
 
-func getTypeName(iface types.Type, name string, pkg pkgData) string {
+func (pkg *pkgData) getTypeName(iface types.Type, name string) string {
 	switch dt := iface.(type) {
 	case *types.Named:
-		// incorrect if the type is declared in an external package
-		//return dt.Obj().Id()
 		obj := dt.Obj()
 		if pkg := obj.Pkg(); pkg == nil { // universe scope
 			return obj.Name()
@@ -799,13 +817,13 @@ func getTypeName(iface types.Type, name string, pkg pkgData) string {
 	case *types.Basic:
 		return dt.String()
 	case *types.Pointer:
-		return getTypeName(dt.Elem(), name+"|ptr", pkg) + "*"
+		return pkg.getTypeName(dt.Elem(), name+"|ptr") + "*"
 	case *types.Slice:
-		return getTypeName(dt.Elem(), name+"|slice", pkg) + "[]"
+		return pkg.getTypeName(dt.Elem(), name+"|slice") + "[]"
 	case *types.Array:
 		arrLen := dt.Len()
 		name = fmt.Sprintf("%s|[%d]arr", name, arrLen)
-		return fmt.Sprintf("%s[%d]", getTypeName(dt.Elem(), name, pkg), arrLen)
+		return fmt.Sprintf("%s[%d]", pkg.getTypeName(dt.Elem(), name), arrLen)
 	case *types.Map:
 		return "map"
 	case *types.Interface:
@@ -815,10 +833,11 @@ func getTypeName(iface types.Type, name string, pkg pkgData) string {
 	case *types.Chan:
 		return "chan"
 	case *types.Struct:
+		// need name here to uniquely identify this anonymous struct
 		if name == "" {
 			panic(iface)
 		}
-		parseStruct(name, dt, pkg)
+		pkg.parseStruct(name, dt)
 		return name
 	default:
 		_ = dt.(*types.Named)
@@ -826,35 +845,17 @@ func getTypeName(iface types.Type, name string, pkg pkgData) string {
 	}
 }
 
-func parseMethods(obj *types.TypeName, pkg pkgData) {
+func (pkg *pkgData) parseMethods(obj *types.TypeName) {
 	objT := obj.Type()
-	methods := types.NewMethodSet(objT)
-	numMethods := methods.Len()
-	handledMethodNames := make(map[string]bool, numMethods)
-
-	for i := 0; i < numMethods; i++ {
-		method := methods.At(i).Obj()
-		handledMethodNames[method.Name()] = true
-		if !selfMethod(objT, method) {
-			continue // comes from embedded field
+	for _, method := range typeutil.IntuitiveMethodSet(obj.Type(), nil) {
+		methodO := method.Obj()
+		if selfMethod(objT, methodO) {
+			pkg.parseMethod(methodO)
 		}
-		parseMethod(method, pkg)
-	}
-
-	pObjT := types.NewPointer(objT)
-	pMethods := types.NewMethodSet(pObjT)
-	numPMethods := pMethods.Len()
-
-	for i := 0; i < numPMethods; i++ {
-		method := pMethods.At(i).Obj()
-		if handledMethodNames[method.Name()] || !selfMethod(pObjT, method) {
-			continue // already handled or from embedded field
-		}
-		parseMethod(method, pkg)
 	}
 }
 
-func parseStruct(name string, obj *types.Struct, pkg pkgData) {
+func (pkg *pkgData) parseStruct(name string, obj *types.Struct) {
 	numFields := obj.NumFields()
 	fields := make([]namedType, numFields)
 	for i := 0; i < numFields; i++ {
@@ -863,15 +864,15 @@ func parseStruct(name string, obj *types.Struct, pkg pkgData) {
 		fieldPath := fmt.Sprintf("%s.%s", name, field.Name())
 		fields[i] = namedType{
 			Name:     field.Name(),
-			DataType: getTypeName(field.Type(), fieldPath, pkg),
+			DataType: pkg.getTypeName(field.Type(), fieldPath),
 		}
 	}
 	pkg.Structs[name] = structDef{Fields: fields}
 }
 
-// extract parts common to all architectures into "all" arch
-// and remove said parts from other architectures
-func archSplit(pkgArchs map[string]pkgData) {
+// extract parts common to subsets of architectures into separate architecture
+// and remove said parts from the constituent architectures of the group
+func archSplit(pkgArchs map[string]*pkgData) {
 	// only has "all" architecture, skip
 	if _, hasAll := pkgArchs["all"]; hasAll {
 		if len(pkgArchs) != 1 {
@@ -887,6 +888,7 @@ func archSplit(pkgArchs map[string]pkgData) {
 
 	postMerge(func(string) bool { return true }, pkgArchs, "all")
 	postMerge(func(arch string) bool { split := strings.Split(arch, "-"); return split[len(split)-1] == "cgo" }, pkgArchs, "cgo")
+	postMerge(func(arch string) bool { split := strings.Split(arch, "-"); return split[len(split)-1] != "cgo" }, pkgArchs, "nocgo")
 	postMerge(func(arch string) bool { return unixOS[strings.Split(arch, "-")[0]] }, pkgArchs, "unix")
 
 	for archStr := range knownArch {
@@ -903,11 +905,24 @@ func archSplit(pkgArchs map[string]pkgData) {
 			return split[0] == osStr && split[len(split)-1] == "cgo"
 		}, pkgArchs, osStr+"-cgo")
 	}
+
+	// additional cleanup of empty architectures
+	var emptyKeys []string
+
+	for arch, pkgD := range pkgArchs {
+		if pkgD.empty() {
+			emptyKeys = append(emptyKeys, arch)
+		}
+	}
+
+	for _, key := range emptyKeys {
+		delete(pkgArchs, key)
+	}
 }
 
 // group up results by archFilter, get items in every arch in the group, and extract to separate "arch"
-func postMerge(archFilter func(string) bool, pkgArchs map[string]pkgData, name string) {
-	var filtered pkgData
+func postMerge(archFilter func(string) bool, pkgArchs map[string]*pkgData, name string) {
+	var filtered *pkgData
 	firstPkg := true
 
 	for arch, pkgD := range pkgArchs {
@@ -924,7 +939,7 @@ func postMerge(archFilter func(string) bool, pkgArchs map[string]pkgData, name s
 	}
 
 	// found nothing
-	if filtered.empty() {
+	if firstPkg || filtered.empty() {
 		return
 	}
 
@@ -954,18 +969,13 @@ func pkgParse(inCh <-chan string, outCh chan<- map[string]*packages.Package, cha
 
 		var deletedKeys []string
 		for key, astPkg := range astPkgs {
-			if strings.HasSuffix(astPkg.Name, "_test") || astPkg.Name == "builtin" || astPkg.Name == "main" {
+			if strings.HasSuffix(astPkg.Name, "_test") || astPkg.Name == "builtin" {
 				deletedKeys = append(deletedKeys, key)
 			}
 		}
 
 		for _, key := range deletedKeys {
 			delete(astPkgs, key)
-		}
-
-		if len(astPkgs) > 1 {
-			fmt.Println(len(astPkgs), astPkgs)
-			panic(path)
 		}
 
 		for _, astPkg := range astPkgs {
@@ -978,20 +988,21 @@ func pkgParse(inCh <-chan string, outCh chan<- map[string]*packages.Package, cha
 	chanClose.Do(func() { close(outCh) })
 }
 
-func pkgExtract(inCh <-chan map[string]*packages.Package, outCh chan<- map[string]pkgData, chanClose *sync.Once, wg *sync.WaitGroup) {
+func pkgExtract(inCh <-chan map[string]*packages.Package, outCh chan<- map[string]*pkgData, chanClose *sync.Once, wg *sync.WaitGroup) {
 	for pkgMap := range inCh {
-		pkgArchs := make(map[string]pkgData)
+		pkgArchs := make(map[string]*pkgData)
 		for pkgArch, pkg := range pkgMap {
-			scope := pkg.Types.Scope()
-			names := scope.Names()
-
 			pkgD := newPkgData()
-			for _, name := range names {
-				switch obj := scope.Lookup(name).(type) {
-				case *types.Func:
-					parseFunc(obj, pkgD)
-				case *types.TypeName:
-					parseType(obj, pkgD)
+			for _, pkgDef := range typeutil.Dependencies(pkg.Types) {
+				scope := pkgDef.Scope()
+				names := scope.Names()
+				for _, name := range names {
+					switch obj := scope.Lookup(name).(type) {
+					case *types.Func:
+						pkgD.parseFunc(obj)
+					case *types.TypeName:
+						pkgD.parseType(obj)
+					}
 				}
 			}
 
@@ -1007,8 +1018,8 @@ func pkgExtract(inCh <-chan map[string]*packages.Package, outCh chan<- map[strin
 	chanClose.Do(func() { close(outCh) })
 }
 
-func pkgMerge(inCh <-chan map[string]pkgData, outPath string, wg *sync.WaitGroup) {
-	allPkgs := make(map[string]pkgData)
+func pkgMerge(inCh <-chan map[string]*pkgData, outPath string, wg *sync.WaitGroup) {
+	allPkgs := make(map[string]*pkgData)
 
 	for pkgArchs := range inCh {
 		for arch, pkg := range pkgArchs {
@@ -1032,7 +1043,7 @@ func main() {
 
 	dirChan := make(chan string)
 	pkgChan := make(chan map[string]*packages.Package)
-	pkgDataChan := make(chan map[string]pkgData)
+	pkgDataChan := make(chan map[string]*pkgData)
 
 	numProcs := runtime.GOMAXPROCS(0)
 
