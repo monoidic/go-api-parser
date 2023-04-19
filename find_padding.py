@@ -84,10 +84,13 @@ def get_struct(name: str, data: dict[str, Any]) -> GoType:
     for t in types:
         size = align(size, t.align) + t.size
 
+    alignment = max((t.align for t in types), default=1)
+    # size = align(size, alignment)
+
     return GoType(
         size=size,
-        align=max((t.align for t in types), default=1),
-        has_padding=size != sum(t.size for t in types),
+        align=alignment,
+        has_padding=size > align(sum(t.size for t in types), alignment),
     )
 
 
