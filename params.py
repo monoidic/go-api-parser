@@ -75,9 +75,16 @@ go_error = data.StructureDataType('go_error', 0)
 go_error.add(go_iface, ptr_size * 2, 'iface', None)
 
 # architecture-specific; TODO select based on architecture
-# https://github.com/golang/go/blob/master/src/cmd/compile/abi-internal.md#amd64-architecture
-integer_registers = ['RAX', 'RBX', 'RCX', 'RDI', 'RSI', 'R8', 'R9', 'R10', 'R11']
-float_registers = ['XMM{}'.format(i) for i in range(15)]
+# https://github.com/golang/go/blob/master/src/cmd/compile/abi-internal.md
+language_id = currentProgram.getLanguageID().toString()
+if language_id.startswith('x86') and ptr_size == 8:
+    integer_registers = ['RAX', 'RBX', 'RCX', 'RDI', 'RSI', 'R8', 'R9', 'R10', 'R11']
+    float_registers = ['XMM{}'.format(i) for i in range(15)]
+elif language_id.startswith('AARCH64'):
+    integer_registers = ['x{}'.format(i) for i in range(16)]
+    float_registers = ['d{}'.format(i) for i in range(16)]
+else:
+    raise Exception('unhandled platform: {}'.format(language_id))
 
 #space = currentProgram.getAddressFactory().getUniqueSpace()
 #space = ghidra.program.model.address.AddressSpace.OTHER_SPACE
@@ -152,8 +159,9 @@ def make_slice(t, name):
 
 type_map = {}
 
-def align(x, y):
-    return x + (-x % y)
+# align size to be a multiple of align
+def align(size, align):
+    return size + (-size % align)
 
 
 def get_type(s):
@@ -170,9 +178,10 @@ def get_type(s):
         el_type, el_len, el_align = get_type(element_s)
         if num:  # array
             arr_len = int(num)
-            aligned_arr_len = align(el_len, el_align) * (arr_len-1) + el_len
-            ret = data.ArrayDataType(el_type, arr_len, el_len), aligned_arr_len, el_align
-        else: # slice
+            aligned_el_len = align(el_len, el_align)
+            arr_t = data.ArrayDataType(el_type, arr_len, aligned_el_len)
+            ret = arr_t, arr_len * aligned_el_len, el_align
+        else:  # slice
             ret = make_slice(el_type, element_s), 3 * ptr_size, ptr_size
     elif s in prog_definitions['Interfaces']:
         ret = go_iface, 2 * ptr_size, ptr_size
@@ -221,6 +230,10 @@ def get_struct(name):
         #struct_t.growStructure(new_offset - current_offset)
         current_offset = new_offset
         struct_t.insertAtOffset(field_offset, field_t, field_size, field_name, None)
+
+    end_padding = align(current_offset, alignment) - current_offset
+    if end_padding:
+        struct_t.growStructure(end_padding)
 
     # required padding byte for non-empty structs
     #struct_t.growStructure(1)
@@ -308,8 +321,8 @@ def assign_registers(I, FP, datatype):
                 break
             # register is too big, get smaller-sized "child register"
             registers.append(reg.getChildRegisters()[0])
-    if padding_size > 0:
-        out.append(Varnode(space.getAddress(0x10000), padding_size))
+    # if padding_size > 0:
+    #     out.append(Varnode(space.getAddress(0x10000), padding_size))
 
     return out, I, FP
 
@@ -400,7 +413,7 @@ def set_storage(func, param_types, result_types):
         ret_datatype, ret_storage = get_results(result_types, stack_offset)
         func.setReturn(ret_datatype, ret_storage, SourceType.USER_DEFINED)
     except:
-        print(e)
+        pass
 
 
 # recursively unpack types into component types for register assignment

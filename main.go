@@ -809,11 +809,12 @@ func (pkg *pkgData) getTypeName(iface types.Type, name string) string {
 	switch dt := iface.(type) {
 	case *types.Named:
 		obj := dt.Obj()
-		if pkg := obj.Pkg(); pkg == nil { // universe scope
+		if pkg := obj.Pkg(); pkg == nil {
+			// universe scope
 			return obj.Name()
-		} else {
-			return fmt.Sprintf("%s.%s", obj.Pkg().Path(), obj.Name())
 		}
+		// full package path
+		return fmt.Sprintf("%s.%s", obj.Pkg().Path(), obj.Name())
 	case *types.Basic:
 		return dt.String()
 	case *types.Pointer:
