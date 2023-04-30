@@ -7,16 +7,17 @@ jobs:
         runs-on: ubuntu-latest
         outputs:
             go_versions: ${{steps.get_versions.outputs.go_versions}}
-            key: ${{ steps.get_date.outputs.latest_version }}
+            key: ${{ steps.get_version.outputs.latest_version }}
         steps:
-            - id: get_date
+            - uses: actions/checkout@v3
+            - id: get_version
               run: printf 'latest_version=%s\n' $(./golang_latest.version.sh) >> "$GITHUB_OUTPUT"
 
             - id: cache_golang
               uses: actions/cache@v3
               with:
                   path: go
-                  key: ${{ steps.get_date.outputs.latest_version }}
+                  key: ${{ steps.get_version.outputs.latest_version }}
 
             - name: Fetch Golang
               if: steps.cache_golang.outputs.cache-hit != 'true'
