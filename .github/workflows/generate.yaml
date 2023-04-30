@@ -62,6 +62,7 @@ jobs:
               with:
                 path: artifacts
             - run: mv artifacts/*/* results
+            - run: rmdir artifacts/*
             - run: ./dedup.py
             - uses: actions/upload-artifact@v3
               with:

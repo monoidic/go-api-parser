@@ -2,7 +2,6 @@
 
 import json
 import glob
-import pathlib
 import shutil
 
 from typing import Iterable
@@ -63,7 +62,6 @@ def main():
     jsons1, jsons2 = tee(get_jsons(filenames))
     next(jsons2)
 
-    pathlib.Path('artifacts').mkdir(exist_ok=True)
     shutil.copyfile(filenames[0], f'artifacts/{filenames[0].split("/")[1]}')
 
     for old, new, name in zip(jsons1, jsons2, filenames[1:]):
