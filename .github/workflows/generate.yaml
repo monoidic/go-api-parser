@@ -10,7 +10,7 @@ jobs:
             key: ${{ steps.get_date.outputs.latest_version }}
         steps:
             - id: get_date
-              run: printf 'latest_version=%s\n' $(golang_latest.version.sh) >> "$GITHUB_OUTPUT"
+              run: printf 'latest_version=%s\n' $(./golang_latest.version.sh) >> "$GITHUB_OUTPUT"
 
             - id: cache_golang
               uses: actions/cache@v3
