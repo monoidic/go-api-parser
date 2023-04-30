@@ -44,8 +44,7 @@ jobs:
                 path: go
                 key: ${{ needs.fetch_golang.outputs.key }}
 
-            - run: ls -lart go
-            - run: env go_dir=go tag=${{ matrix.go_version }} ./gen.sh
+            - run: env go_dir=$(realpath go) tag=${{ matrix.go_version }} ./gen.sh
 
             - uses: actions/upload-artifact@v3
               with:
