@@ -66,7 +66,7 @@ def main():
 
     for old, new, name in zip(jsons1, jsons2, filenames[1:]):
         version = name.split('/')[1][:-5]
-        print(version)
+        print(version, flush=True)
         delta = get_delta(old, new)
         with open(f'artifacts/{version}_delta.json', 'w') as fd:
             json.dump(delta, fd)
