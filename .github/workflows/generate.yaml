@@ -39,6 +39,7 @@ jobs:
             - uses: actions/setup-go@v4
               with:
                 go-version: stable
+                cache-dependency-path: go.sum
             - uses: actions/cache@v3
               with:
                 path: go
@@ -61,7 +62,8 @@ jobs:
             - run: sudo sh -c 'apt update && apt install python3'
             - uses: dawidd6/action-download-artifact@v2.27.0
               with:
-                name: '.*.json'
+                name: 'go1.*.json'
+                name_is_regexp: true
                 path: results/
             - run: ./dedup.py
             - uses: actions/upload-artifact@v3
