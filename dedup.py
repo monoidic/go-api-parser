@@ -5,7 +5,6 @@ import glob
 import shutil
 
 from typing import Iterable
-from itertools import tee
 
 
 def get_delta(a, b, path=()):
@@ -43,11 +42,15 @@ def apply_delta(a, delta):
     return a
 
 
-def get_jsons(filenames: Iterable[str]) -> Iterable[dict]:
-    for filename in filenames:
+def get_jsons(filenames: Iterable[str]) -> Iterable[tuple[dict, dict]]:
+    with open(filenames[0]) as fd:
+        old = json.load(fd)
+
+    for filename in filenames[1:]:
         with open(filename) as fd:
-            data = json.load(fd)
-        yield data
+            new = json.load(fd)
+        yield old, new
+        old = new
 
 
 def main():
@@ -59,12 +62,9 @@ def main():
         ],
     )
 
-    jsons1, jsons2 = tee(get_jsons(filenames))
-    next(jsons2)
-
     shutil.copyfile(filenames[0], f'artifacts/{filenames[0].split("/")[1]}')
 
-    for old, new, name in zip(jsons1, jsons2, filenames[1:]):
+    for (old, new), name in zip(get_jsons(filenames), filenames[1:]):
         version = name.split('/')[1][:-5]
         print(version, flush=True)
         delta = get_delta(old, new)
