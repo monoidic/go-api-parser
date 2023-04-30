@@ -36,13 +36,15 @@ jobs:
                 go_version: ${{ fromJson(needs.fetch_golang.outputs.go_versions) }}
         steps:
             - uses: actions/checkout@v3
+            - uses: actions/setup-go@v4
+              with:
+                go-version: stable
             - uses: actions/cache@v3
               with:
                 path: go
                 key: ${{ needs.fetch_golang.outputs.key }}
 
-            - run: ls -lart
-            - run: sudo sh -c 'apt update && apt install golang-go'
+            - run: ls -lart go
             - run: env go_dir=go tag=${{ matrix.go_version }} ./gen.sh
 
             - uses: actions/upload-artifact@v3
