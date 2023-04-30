@@ -58,13 +58,10 @@ jobs:
         needs: build
         steps:
             - uses: actions/checkout@v3
-            - uses: actions/setup-python@v4
-            - uses: dawidd6/action-download-artifact@v2.27.0
+            - uses: actions/download-artifact@v3.0.2
               with:
-                name: 'go1.*.json'
-                name_is_regexp: true
-                search_artifacts: true
-                path: results/
+                path: artifacts
+            - run: mv artifacts/*/* results
             - run: ./dedup.py
             - uses: actions/upload-artifact@v3
               with:
