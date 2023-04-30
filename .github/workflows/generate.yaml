@@ -24,7 +24,8 @@ jobs:
               run: git clone https://github.com/golang/go
 
             - id: get_versions
-              run: printf 'go_versions=%s\n' $(git -C go tag | grep -vE '(weekly|release|beta|rc)' | sort -V | grep -A 999 go1.14 | jq -Rsc 'split("\n") | .[:-1]') | tee "$GITHUB_OUTPUT"
+              #run: printf 'go_versions=%s\n' $(git -C go tag | grep -vE '(weekly|release|beta|rc)' | sort -V | grep -A 999 go1.14 | jq -Rsc 'split("\n") | .[:-1]') | tee "$GITHUB_OUTPUT"
+              run: printf 'go_versions=["go1.14","go1.14.1","go1.14.2"]\n' | tee "$GITHUB_OUTPUT"
 
     build:
         name: Build data files
@@ -40,6 +41,7 @@ jobs:
                 path: go
                 key: ${{ needs.fetch_golang.outputs.key }}
 
+            - run: ls -lart
             - run: sudo sh -c 'apt update && apt install golang-go'
             - run: env go_dir=go tag=${{ matrix.go_version }} ./gen.sh
 
