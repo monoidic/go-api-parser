@@ -69,7 +69,7 @@ def main():
         print(version, flush=True)
         delta = get_delta(old, new)
         with open(f'artifacts/{version}_delta.json', 'w') as fd:
-            json.dump(delta, fd)
+            json.dump(delta, fd, sort_keys=True)
 
 
 if __name__ == '__main__':
