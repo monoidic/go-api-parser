@@ -8,4 +8,4 @@ while true; do
         break
     fi
     ((page++))
-done | grep -vE '(weekly|release|beta|rc)' | wc -l
+done | grep -vE '(weekly|release|beta|rc)' | grep -A 999 go1.14 | wc -l
