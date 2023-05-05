@@ -7,24 +7,24 @@ jobs:
         runs-on: ubuntu-latest
         outputs:
             go_versions: ${{steps.get_versions.outputs.go_versions}}
-            key: ${{ steps.get_version.outputs.latest_version }}
+            key: ${{ steps.get_version.outputs.num_versions }}
         steps:
             - uses: actions/checkout@v3
             - id: get_version
-              run: printf 'latest_version=%s\n' $(./golang_latest.version.sh) | tee "$GITHUB_OUTPUT"
+              run: printf 'num_versions=%s\n' $(./golang_num_versions.sh) | tee -a "$GITHUB_OUTPUT"
 
             - id: cache_golang
               uses: actions/cache@v3
               with:
                   path: go
-                  key: ${{ steps.get_version.outputs.latest_version }}
+                  key: ${{ steps.get_version.outputs.num_versions }}
 
             - name: Fetch Golang
               if: steps.cache_golang.outputs.cache-hit != 'true'
               run: git clone https://github.com/golang/go
 
             - id: get_versions
-              run: printf 'go_versions=%s\n' $(git -C go tag | grep -vE '(weekly|release|beta|rc)' | sort -V | grep -A 999 go1.14 | jq -Rsc 'split("\n") | .[:-1]') | tee "$GITHUB_OUTPUT"
+              run: printf 'go_versions=%s\n' $(git -C go tag | grep -vE '(weekly|release|beta|rc)' | sort -V | grep -A 999 go1.14 | jq -Rsc 'split("\n") | .[:-1]') | tee -a "$GITHUB_OUTPUT"
 
     build:
         name: Build data files
