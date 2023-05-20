@@ -262,7 +262,7 @@ func dirwalk(ch chan<- string) {
 	for {
 		root, success := st.pop()
 		if !success {
-			return
+			break
 		}
 		ch <- root
 
@@ -280,6 +280,8 @@ func dirwalk(ch chan<- string) {
 
 		st.pushMultipleRev(subdirs)
 	}
+
+	close(ch)
 }
 
 // copy-pasted from github.com/golang/go src/go/build/syslist.go
@@ -1019,7 +1021,7 @@ func pkgExtract(inCh <-chan map[string]*packages.Package, outCh chan<- map[strin
 	chanClose.Do(func() { close(outCh) })
 }
 
-func pkgMerge(inCh <-chan map[string]*pkgData, outPath string, wg *sync.WaitGroup) {
+func pkgMerge(inCh <-chan map[string]*pkgData, outPath string) {
 	allPkgs := make(map[string]*pkgData)
 
 	for pkgArchs := range inCh {
@@ -1034,39 +1036,31 @@ func pkgMerge(inCh <-chan map[string]*pkgData, outPath string, wg *sync.WaitGrou
 	data := check1(json.Marshal(allPkgs))
 
 	check(os.WriteFile(outPath, data, 0o666))
-
-	wg.Done()
 }
+
+const BUFSIZE = 1000
 
 func main() {
 	outPath := check1(filepath.Abs(os.Args[2]))
 	check(os.Chdir(os.Args[1]))
 
-	dirChan := make(chan string)
-	pkgChan := make(chan map[string]*packages.Package)
-	pkgDataChan := make(chan map[string]*pkgData)
+	dirChan := make(chan string, BUFSIZE)
+	pkgChan := make(chan map[string]*packages.Package, BUFSIZE)
+	pkgDataChan := make(chan map[string]*pkgData, BUFSIZE)
 
 	numProcs := runtime.GOMAXPROCS(0)
 
-	var wg, pkgParseWg, pkgExtractWg sync.WaitGroup
+	var pkgParseClose, pkgExtractClose sync.Once
+	var pkgParseWg, pkgExtractWg sync.WaitGroup
 	pkgParseWg.Add(numProcs)
 	pkgExtractWg.Add(numProcs)
 
-	go pkgMerge(pkgDataChan, outPath, &wg)
-
-	var pkgParseClose, pkgExtractClose sync.Once
+	go dirwalk(dirChan)
 
 	for i := 0; i < numProcs; i++ {
 		go pkgParse(dirChan, pkgChan, &pkgParseClose, &pkgParseWg)
 		go pkgExtract(pkgChan, pkgDataChan, &pkgExtractClose, &pkgExtractWg)
 	}
 
-	dirwalk(dirChan)
-
-	// dirwalk done, start channel close chain
-	wg.Add(1)
-	close(dirChan)
-
-	// wait for pkgMerge to finish
-	wg.Wait()
+	pkgMerge(pkgDataChan, outPath)
 }
