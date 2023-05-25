@@ -26,7 +26,7 @@ This script was developed for Ghidra and has been tested only on Windows (amd64 
 Contributions are welcome. Please submit a pull request if you have any improvements or bug fixes.
 
 ## Contact
-If you have any questions, please feel free to contact me at [Mikk pane oma email siia].
+If you have any questions, please feel free to open an issue.
 
 ## Disclaimer
 This script is provided as-is without any warranty. Use it at your own risk.
