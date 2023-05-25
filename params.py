@@ -160,9 +160,9 @@ slices_map = {}
 
 def make_slice(t, name):
     """
-    This function is used to create a slice in the Go programming language, 
+    This function is used to create a slice in the Go programming language,
     which is a structure containing a pointer to the data (ptr), length of the data (len),
-    and the capacity of the slice (cap). The name of the slice and the data type it 
+    and the capacity of the slice (cap). The name of the slice and the data type it
     contains are given as parameters.
 
     Parameters:
@@ -188,27 +188,24 @@ type_map = {}
 
 def align(size, align):
     """
-    This function retrieves the type of a given string identifier. 
-    If the identifier is already mapped in type_map, it returns the corresponding type. 
-    Otherwise, it tries to infer the type based on several possible built-in types,
-    pointers, arrays, slices, interfaces, structs, and aliases.
+    This function finds the first multiple of align greater than or equal to
+    the offset given by size, for the purpose of finding start of some element
+    which may require padding due to alignment reasons.
 
     Parameters:
-    s (str): The string identifier for which the type is to be inferred.
+    size (int): An integer offset, in bytes.
+    align (int): The alignment required by the element, in bytes.
 
     Returns:
-    tuple: A tuple containing the inferred type, its length, and alignment. 
-
-    Raises:
-    Exception: If the type of the string identifier cannot be determined.
+    int: The offset of the next element.
     """
     return size + (-size % align)
 
 
 def get_type(s):
     """
-    This function retrieves the type of a given string identifier. 
-    If the identifier is already mapped in type_map, it returns the corresponding type. 
+    This function retrieves the type of a given string identifier.
+    If the identifier is already mapped in type_map, it returns the corresponding type.
     Otherwise, it tries to infer the type based on several possible built-in types,
     pointers, arrays, slices, interfaces, structs, and aliases.
 
@@ -216,7 +213,7 @@ def get_type(s):
     s (str): The string identifier for which the type is to be inferred.
 
     Returns:
-    tuple: A tuple containing the inferred type, its length, and alignment. 
+    tuple: A tuple containing the inferred type, its length, and alignment.
 
     Raises:
     Exception: If the type of the string identifier cannot be determined.
@@ -262,7 +259,7 @@ def get_struct(name):
     """
     This function retrieves the structure data type corresponding to a given name from the 'struct_defs' dictionary.
     If it does not exist, it creates the data type by examining the corresponding fields in the 'prog_definitions'.
-    The created data type includes proper alignment and size calculations. 
+    The created data type includes proper alignment and size calculations.
 
     Parameters
     ----------
@@ -336,9 +333,9 @@ dynamic_type_map = {}
 # TODO handle params partially passed on the stack, partially in registers
 def get_dynamic_type(types):
     """
-    This function retrieves or creates a composite type that combines the 
-    specified types in the input list. This is used to handle multiple return 
-    types from Go functions. The generated composite type is stored in the 
+    This function retrieves or creates a composite type that combines the
+    specified types in the input list. This is used to handle multiple return
+    types from Go functions. The generated composite type is stored in the
     `dynamic_type_map` dictionary for reuse.
 
     Parameters
@@ -353,7 +350,7 @@ def get_dynamic_type(types):
 
     Note
     ----
-    The naming convention for the composite type is 'go_dynamic_' followed by 
+    The naming convention for the composite type is 'go_dynamic_' followed by
     the input type names joined by '+' symbols.
     """
     name = 'go_dynamic_' + '+'.join(types)
@@ -375,7 +372,7 @@ def get_dynamic_type(types):
 
 def functions_iter():
     """
-    This function is a generator that yields each defined function within the current binary. 
+    This function is a generator that yields each defined function within the current binary.
     It provides a simple way to iterate over all the functions in a binary.
 
     Yields
@@ -385,7 +382,7 @@ def functions_iter():
 
     Note
     ----
-    The function uses the `getFirstFunction` and `getFunctionAfter` functions from 
+    The function uses the `getFirstFunction` and `getFunctionAfter` functions from
     Ghidra's API to traverse the list of functions.
     """
     func = getFirstFunction()
@@ -396,9 +393,9 @@ def functions_iter():
 
 def assign_registers(I, FP, datatype):
     """
-    This function attempts to assign registers for a given datatype. Registers are selected based on the 
-    datatype, either integer or floating point, from a pool of current available registers. It handles padding and 
-    register overflow scenarios. In the event of an array data type of length more than 1 or if no more registers 
+    This function attempts to assign registers for a given datatype. Registers are selected based on the
+    datatype, either integer or floating point, from a pool of current available registers. It handles padding and
+    register overflow scenarios. In the event of an array data type of length more than 1 or if no more registers
     are available, the function fails and returns None.
 
     Parameters
@@ -415,8 +412,8 @@ def assign_registers(I, FP, datatype):
     Returns
     -------
     tuple
-        A tuple containing a list of the assigned Varnodes, the last used integer register index, 
-        and the last used floating point register index. 
+        A tuple containing a list of the assigned Varnodes, the last used integer register index,
+        and the last used floating point register index.
 
     Raises
     ------
@@ -469,8 +466,8 @@ def assign_registers(I, FP, datatype):
 
 def assign_type(type_name, I, FP, stack_offset):
     """
-    This function attempts to assign a type either to a register or to the stack. It first attempts to assign 
-    the type to a register. If assignment to a register fails (for instance, if the type size is too large for 
+    This function attempts to assign a type either to a register or to the stack. It first attempts to assign
+    the type to a register. If assignment to a register fails (for instance, if the type size is too large for
     any available register), the type is assigned to the stack.
 
     Parameters
@@ -517,13 +514,13 @@ def assign_type(type_name, I, FP, stack_offset):
 
 def get_params(param_types):
     """
-    This function processes a list of parameter types and assigns each one to a register or stack. 
+    This function processes a list of parameter types and assigns each one to a register or stack.
     It does this by invoking the `assign_type` function on each type in the parameter list.
 
     Parameters
     ----------
     param_types : list
-        The list of parameter types to be assigned. Each type in the list should be represented by 
+        The list of parameter types to be assigned. Each type in the list should be represented by
         a dictionary containing at least a 'DataType' key.
 
     Returns
@@ -557,14 +554,14 @@ def get_params(param_types):
 
 def get_results(result_types, stack_offset):
     """
-    This function processes a list of result types and assigns each one to a register or stack, similar to `get_params`. 
-    Since Ghidra only handles a single return value, the function returns a dynamically generated struct type 
+    This function processes a list of result types and assigns each one to a register or stack, similar to `get_params`.
+    Since Ghidra only handles a single return value, the function returns a dynamically generated struct type
     with similar storage characteristics when there are multiple return types.
 
     Parameters
     ----------
     result_types : list
-        The list of result types to be assigned. Each type in the list should be represented by a dictionary 
+        The list of result types to be assigned. Each type in the list should be represented by a dictionary
         containing at least a 'DataType' key.
     stack_offset : int
         The initial stack offset before assigning the result types.
@@ -573,7 +570,7 @@ def get_results(result_types, stack_offset):
     -------
     tuple
         A tuple containing the following elements:
-        - The datatype of the return value. If there are multiple return types, a dynamically generated struct 
+        - The datatype of the return value. If there are multiple return types, a dynamically generated struct
           type is returned.
         - A VariableStorage instance representing the storage location(s) of the return value(s).
     """
@@ -603,19 +600,19 @@ def get_results(result_types, stack_offset):
 
 def set_storage(func, param_types, result_types):
     """
-    This function assigns storage locations to the parameters and results of a given function following certain rules. 
+    This function assigns storage locations to the parameters and results of a given function following certain rules.
     The parameters are assigned first and then the results. Stack offset is updated and aligned after assigning parameters.
-    The function storage information is then updated with these assignments. 
+    The function storage information is then updated with these assignments.
 
     Parameters
     ----------
     func : Function
-        The function whose storage locations are to be assigned. 
+        The function whose storage locations are to be assigned.
     param_types : list
-        The list of parameter types to be assigned. Each type in the list should be represented by a dictionary 
+        The list of parameter types to be assigned. Each type in the list should be represented by a dictionary
         containing at least a 'DataType' key.
     result_types : list
-        The list of result types to be assigned. Each type in the list should be represented by a dictionary 
+        The list of result types to be assigned. Each type in the list should be represented by a dictionary
         containing at least a 'DataType' key.
 
     Returns
@@ -643,8 +640,8 @@ def recursive_struct_unpack(datatype):
     """
     This function takes in a datatype and recursively unpacks it into its component types.
     It is mainly used to facilitate the assignment of storage locations to composite types
-    in registers. For non-composite types, the function simply yields the original type. 
-    For structures, it recursively yields each component type. 
+    in registers. For non-composite types, the function simply yields the original type.
+    For structures, it recursively yields each component type.
 
     Parameters
     ----------
@@ -661,7 +658,7 @@ def recursive_struct_unpack(datatype):
     For array types of length 0, the function does nothing. For arrays of length 1,
     it recursively register-assigns the one element. For complex types, it recursively
     register-assigns its real and imaginary parts. For integral types that fit into two
-    integer registers, it assigns the least significant and most significant halves of 
+    integer registers, it assigns the least significant and most significant halves of
     the value to registers.
     """
     if isinstance(datatype, data.StructureDataType):
@@ -703,13 +700,13 @@ def recursive_struct_unpack(datatype):
 
 def main():
     """
-    This function retrieves the signatures of the functions in a given program and assigns 
-    storage locations to their parameters and results based on the signatures. 
+    This function retrieves the signatures of the functions in a given program and assigns
+    storage locations to their parameters and results based on the signatures.
 
     Note
     ----
-    It assumes that `prog_definitions['Funcs']` is a dictionary mapping function names to 
-    their corresponding signature dictionaries. The function iterates over all the functions 
+    It assumes that `prog_definitions['Funcs']` is a dictionary mapping function names to
+    their corresponding signature dictionaries. The function iterates over all the functions
     in the program, retrieves their signatures, and assigns storage locations to the parameters
     and results based on the signature.
     """
