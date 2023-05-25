@@ -41,10 +41,56 @@ slice_t = GoType(POINTER_SIZE * 3, POINTER_SIZE)
 
 # round x up to a multiple of y
 def align(size: int, align: int) -> int:
+    """
+    This function aligns a given size to the specified alignment value.
+
+    Parameters
+    ----------
+    size : int
+        The size to be aligned.
+    align : int
+        The alignment value.
+
+    Returns
+    -------
+    int
+        The aligned size.
+
+    Note
+    ----
+    This function uses the modulus operation to calculate the additional amount
+    required to increase the size so that it aligns with the specified alignment value.
+    """
     return size + (-size % align)
 
 
 def get_type(name: str, data: dict[str, Any]) -> GoType:
+    """
+    This function retrieves the Go data type for a given type name.
+
+    Parameters
+    ----------
+    name : str
+        The name of the Go data type to be retrieved.
+    data : dict[str, Any]
+        The dictionary containing the data types.
+
+    Returns
+    -------
+    GoType
+        The GoType instance representing the requested Go data type.
+
+    Raises
+    ------
+    NotFoundError
+        If the name is not found in the dictionary of data types.
+
+    Note
+    ----
+    The function first checks if the name is already known. If it's unknown,
+    the function then checks if the name refers to a pointer, slice, array,
+    interface, or other Go data type. The corresponding GoType instance is then returned.
+    """
     if name in known:
         return known[name]
 
@@ -75,6 +121,28 @@ def get_type(name: str, data: dict[str, Any]) -> GoType:
 
 
 def get_struct(name: str, data: dict[str, Any]) -> GoType:
+    """
+    This function retrieves the Go data type for a given struct name.
+
+    Parameters
+    ----------
+    name : str
+        The name of the Go struct type to be retrieved.
+    data : dict[str, Any]
+        The dictionary containing the data types.
+
+    Returns
+    -------
+    GoType
+        The GoType instance representing the requested Go struct type.
+
+    Note
+    ----
+    This function computes the size of the struct by summing the sizes of its 
+    fields after aligning them. The alignment of the struct is the maximum of 
+    the alignments of its fields. The function then returns a GoType instance 
+    representing this struct.
+    """
     types = [
         get_type(field['DataType'], data)
         for field in data['Structs'][name]['Fields']
@@ -95,6 +163,21 @@ def get_struct(name: str, data: dict[str, Any]) -> GoType:
 
 
 def main() -> None:
+    """
+    This function is the entry point of the script. 
+
+    The function first opens the `go1.20.3.json` file and loads the JSON data into memory.
+    Then, it iterates over each struct defined in the data.
+
+    For each struct, it tries to retrieve its Go type. If the Go type is found and 
+    it has padding (as determined by the `has_padding` attribute), the name of the 
+    struct is printed to the console.
+
+    If the Go type for a struct is not found (a `NotFoundError` is raised), the function 
+    ignores this struct and continues to the next one.
+
+    This function does not return any value.
+    """
     with open('results/go1.20.3.json', encoding='utf8') as fd:
         data = json.load(fd)['all']
 

@@ -31,6 +31,17 @@ import (
 // everything:  go tool dist list -json | jq -r '.[] | "\u0022" + .GOOS + "-" + .GOARCH + "\u0022,"'
 var architectures = getArchitectures()
 
+// getArchitectures generates a list of architectures supported by the
+// specific version of Go specified in the "version" environment variable.
+// It covers Go versions from 1.1 up to 1.20, and for each version,
+// it appends the architectures introduced in that version to the list.
+//
+// The function uses semantic versioning to compare Go versions. If the
+// specified Go version is older than the version currently considered in the function,
+// the function will not include the architectures introduced in and after the considered version.
+//
+// The list of architectures is constructed based on the Go release notes
+// (https://go.dev/doc/devel/release), with a few exceptions marked with TODOs.
 func getArchitectures() (out []string) {
 	// TODO check ALL of this over
 	out = []string{
