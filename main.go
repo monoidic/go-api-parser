@@ -976,7 +976,7 @@ func postMerge(archFilter func(string) bool, pkgArchs map[string]*pkgData, name 
 	pkgArchs[name] = filtered
 }
 
-func pkgParse(inCh <-chan string, outCh chan<- map[string]*packages.Package, chanClose *sync.Once, wg *sync.WaitGroup) {
+func pkgParse(inCh <-chan string, outCh chan<- map[string]*packages.Package, wg *sync.WaitGroup) {
 	fset := token.NewFileSet()
 	for path := range inCh {
 		astPkgs := check1(parser.ParseDir(fset, path, nil, parser.PackageClauseOnly|parser.ParseComments))
@@ -998,11 +998,9 @@ func pkgParse(inCh <-chan string, outCh chan<- map[string]*packages.Package, cha
 	}
 
 	wg.Done()
-	wg.Wait()
-	chanClose.Do(func() { close(outCh) })
 }
 
-func pkgExtract(inCh <-chan map[string]*packages.Package, outCh chan<- map[string]*pkgData, chanClose *sync.Once, wg *sync.WaitGroup) {
+func pkgExtract(inCh <-chan map[string]*packages.Package, outCh chan<- map[string]*pkgData, wg *sync.WaitGroup) {
 	for pkgMap := range inCh {
 		pkgArchs := make(map[string]*pkgData)
 		for pkgArch, pkg := range pkgMap {
@@ -1028,8 +1026,6 @@ func pkgExtract(inCh <-chan map[string]*packages.Package, outCh chan<- map[strin
 	}
 
 	wg.Done()
-	wg.Wait()
-	chanClose.Do(func() { close(outCh) })
 }
 
 func pkgMerge(inCh <-chan map[string]*pkgData, outPath string) {
@@ -1049,6 +1045,11 @@ func pkgMerge(inCh <-chan map[string]*pkgData, outPath string) {
 	check(os.WriteFile(outPath, data, 0o666))
 }
 
+func closeChanWait[T any](wg *sync.WaitGroup, ch chan T) {
+	wg.Wait()
+	close(ch)
+}
+
 const BUFSIZE = 1000
 
 func main() {
@@ -1061,7 +1062,6 @@ func main() {
 
 	numProcs := runtime.GOMAXPROCS(0)
 
-	var pkgParseClose, pkgExtractClose sync.Once
 	var pkgParseWg, pkgExtractWg sync.WaitGroup
 	pkgParseWg.Add(numProcs)
 	pkgExtractWg.Add(numProcs)
@@ -1069,9 +1069,12 @@ func main() {
 	go dirwalk(dirChan)
 
 	for i := 0; i < numProcs; i++ {
-		go pkgParse(dirChan, pkgChan, &pkgParseClose, &pkgParseWg)
-		go pkgExtract(pkgChan, pkgDataChan, &pkgExtractClose, &pkgExtractWg)
+		go pkgParse(dirChan, pkgChan, &pkgParseWg)
+		go pkgExtract(pkgChan, pkgDataChan, &pkgExtractWg)
 	}
+
+	go closeChanWait(&pkgParseWg, pkgChan)
+	go closeChanWait(&pkgExtractWg, pkgDataChan)
 
 	pkgMerge(pkgDataChan, outPath)
 }
