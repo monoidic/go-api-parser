@@ -747,6 +747,10 @@ func (pkg *pkgData) parseType(obj *types.TypeName) {
 			}
 		case *types.Basic:
 			pkg.Types[name] = typeData{Underlying: elT.Name() + "*"}
+		case *types.Named:
+			elTO := elT.Obj()
+			childName := fmt.Sprintf("%s.%s", elTO.Pkg().Path(), elTO.Name())
+			pkg.Types[name] = typeData{Underlying: childName + "*"}
 		default:
 			doPanic = true
 		}
