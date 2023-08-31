@@ -12,25 +12,125 @@ from ghidra.program.model.pcode import Varnode
 
 from ghidra.program.model import data
 
-# The file 'out.json' which contains function signatures is loaded
-# The file is expected to be in the same directory as this script file
-filename = os.path.dirname(__file__) + '/out.json'
-with open(filename) as fd:
+
+
+GO_MAXVER = 23
+
+versions = ['go1.%d' % num for num in range(GO_MAXVER+1)[::-1]]
+
+#Find section by name
+def getSection(name):
+    block = getMemoryBlock(name)
+    if block is None:
+        print "No %s section found." % name
+        return None
+
+    start = block.getStart()
+    end = block.getEnd()
+    print "%s [start: 0x%x, end: 0x%x]" % (block.getName(), start.getOffset(), end.getOffset())
+    return start, end
+
+#Find version by string search in specific memory block
+def findVersion(name):
+    section = getSection(name)
+    if section is None:
+        return None
+    start, end = section
+    address_set = ghidra.program.model.address.AddressSet(start, end)
+
+    for version in versions:
+        if findBytes(address_set, version, 1, 1):
+            print "Version found"
+            print version
+            return version
+
+    print('version not found in section')
+    return None
+
+def apply_delta(a, delta):
+    """
+    Applies the changes specified in the `delta` dictionary to the `a` dictionary.
+
+    Args:
+        a (dict): The original dictionary to modify.
+        delta (dict): The changes to apply to the original dictionary. This should be in the same 
+                      format as the output of the `get_delta` function. That is, the keys are paths 
+                      (formatted as 'key1->key2->key3') to the values that should be changed, and 
+                      the values are the new values. If the new value is "_DELETED_", the key at 
+                      that path is deleted.
+
+    Returns:
+        dict: The dictionary `a` after applying the changes specified in `delta`.
+
+    Note:
+        This function modifies the dictionary `a` in-place, but also returns it for convenience.
+        Ensure that this side effect is acceptable in your context.
+
+    Examples:
+        >> a = {'x': 1, 'y': {'a': 10, 'b': 20}}
+        >> delta = {'x': 2, 'y->b': 30, 'y->a': '_DELETED_'}
+        >> apply_delta(a, delta)
+        {'x': 2, 'y': {'b': 30}}
+    """
+    for key_path, value in delta.items():
+        key_list = key_path.split("->")
+        current = a
+        for key in key_list[:-1]:
+            current = current[key]
+
+        if value == "_DELETED_":
+            del current[key_list[-1]]
+        else:
+            current[key_list[-1]] = value
+
+    return a
+
+
+unix_os = ['aix', 'android', 'darwin', 'dragonfly', 'freebsd', 'hurd', 'illumos', 'ios', 'linux', 'netbsd', 'openbsd', 'solaris']
+
+def matching_architectures(os, arch, cgo):
+    matches = [os, arch, '{}-{}'.format(os, arch), 'all']
+    if os in unix_os:
+        matches.append('unix')
+    if cgo:
+        matches.extend(['cgo', '{}-{}-cgo'.format(os, arch)])
+    return matches
+
+# version = findVersion('.go.buildinfo')
+version = 'go1.14'
+
+dirname = os.path.dirname(__file__) + '/go_deduped/'
+matches = sorted(
+    (path for path in glob.glob(dirname + '*.json')),
+    key=lambda e: [int(x) for x in e.rsplit('/', 1)[-1][2:].replace('_delta', '').replace('.json', '').split('.')]
+)
+
+indexes = [
+    path.rsplit('/', 1)[-1].replace('_delta', '').replace('.json', '')
+    for path in matches
+]
+end_index = indexes.index(version) + 1
+matches = matches[:end_index]
+
+print(matches)
+
+with open(matches[0]) as fd:
     definitions = json.load(fd)
 
-# Architecture-specific code follows
-# As of now, only windows-amd64 is supported. Support for other architectures
-# can be added in the future.
-current_arch = 'windows-amd64'  # The current architecture
+for match in matches[1:]:
+    with open(match) as fd:
+        delta = json.load(fd)
+    apply_delta(definitions, delta)
 
-# Function signatures that apply to all architectures are retrieved,
-# along with those that are specific to the current architecture.
-# This information is stored in the prog_definitions dictionary.
+# current architecture, for architectures-specific functions
+# TODO Ghidra can report platform info, get this dynamically
+# once more platforms are supported
+current_arch = 'linux-amd64'
+
+# get function signatures applying to all architectures
+# + those specific to the current architecture
 prog_definitions = definitions['all']
-for tag in set((
-    'cgo', 'amd64', 'windows', 'windows-amd64',
-    'windows-cgo', 'windows-amd64-cgo',
-)) & set(definitions):
+for tag in set(matching_architectures('linux', 'amd64', True)) & set(definitions):
     new_definitions = definitions[tag]
     for key in ('Aliases', 'Funcs', 'Interfaces', 'Structs', 'Types'):
         prog_definitions[key].update(new_definitions[key])
@@ -532,7 +632,7 @@ def get_params(param_types):
 
     """
     result_params = []
-    stack_offset = 0
+    stack_offset = 8
     I = 0
     FP = 0
     # print(param_types)
