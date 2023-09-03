@@ -96,8 +96,10 @@ def matching_architectures(os, arch, cgo):
         matches.extend(['cgo', '{}-{}-cgo'.format(os, arch)])
     return matches
 
-# version = findVersion('.go.buildinfo')
-version = 'go1.14'
+# TODO work with older Go (e.g go1.14), Windows etc.
+version = findVersion('.go.buildinfo')
+
+version_tup = tuple(int(num) for num in version[2:].split('.'))
 
 dirname = os.path.dirname(__file__) + '/go_deduped/'
 matches = sorted(
@@ -188,17 +190,26 @@ language_id = currentProgram.getLanguageID().toString()
 if language_id.startswith('x86') and ptr_size == 8:
     integer_registers = ['RAX', 'RBX', 'RCX',
                          'RDI', 'RSI', 'R8', 'R9', 'R10', 'R11']
+    space_reg = 'RAX'
     float_registers = ['XMM{}'.format(i) for i in range(15)]
 elif language_id.startswith('AARCH64'):
     integer_registers = ['x{}'.format(i) for i in range(16)]
     float_registers = ['d{}'.format(i) for i in range(16)]
+    space_reg = 'x0'
 else:
     raise Exception('unhandled platform: {}'.format(language_id))
+
+
+# no passing args in registers, fallback to abi0
+if version_tup < (1, 17):
+    integer_registers = []
+    float_registers = []
+
 
 # Instead of creating a new unique space or using the OTHER_SPACE address space, we are using the address space of the first integer register.
 # space = currentProgram.getAddressFactory().getUniqueSpace()
 # space = ghidra.program.model.address.AddressSpace.OTHER_SPACE
-space = currentProgram.getRegister(integer_registers[0]).getAddressSpace()
+space = currentProgram.getRegister(space_reg).getAddressSpace()
 
 # A dictionary named 'regmap' is created. The keys are the register names (strings), such as "RAX", and the values are the corresponding Ghidra register objects.
 # The registers are retrieved from the currentProgram.
@@ -632,7 +643,7 @@ def get_params(param_types):
 
     """
     result_params = []
-    stack_offset = 8
+    stack_offset = ptr_size
     I = 0
     FP = 0
     # print(param_types)
