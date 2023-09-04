@@ -667,7 +667,7 @@ func mapAnd[V equalsI](x, y map[string]V) map[string]V {
 	return out
 }
 
-// get pkgData with definitions existing in both x and y
+// get pkgData with definitions existing in both pkg and y
 func (pkg *pkgData) and(y *pkgData) *pkgData {
 	return &pkgData{
 		Funcs:      mapAnd(pkg.Funcs, y.Funcs),
@@ -678,12 +678,30 @@ func (pkg *pkgData) and(y *pkgData) *pkgData {
 	}
 }
 
+func mapAndNot[V equalsI](x, y map[string]V) {
+	for name, xV := range x {
+		if yV, ok := y[name]; ok && xV.equals(yV) {
+			delete(x, name)
+		}
+	}
+}
+
+// remove keys from pkg that have an entry with an equal value in y
+func (pkg *pkgData) andNot(y *pkgData) {
+	mapAndNot(pkg.Funcs, y.Funcs)
+	mapAndNot(pkg.Types, y.Types)
+	mapAndNot(pkg.Structs, y.Structs)
+	mapAndNot(pkg.Aliases, y.Aliases)
+	mapAndNot(pkg.Interfaces, y.Interfaces)
+}
+
 func mapMerge[T any](x, y map[string]T) {
 	for k, v := range y {
 		x[k] = v
 	}
 }
 
+// merge y into pkg
 func (pkg *pkgData) merge(y *pkgData) {
 	mapMerge(pkg.Funcs, y.Funcs)
 	mapMerge(pkg.Types, y.Types)
@@ -698,6 +716,7 @@ func mapNot[T any](x, y map[string]T) {
 	}
 }
 
+// remove keys existing in y from pkg
 func (pkg *pkgData) not(y *pkgData) {
 	mapNot(pkg.Funcs, y.Funcs)
 	mapNot(pkg.Types, y.Types)
@@ -923,36 +942,34 @@ func archSplit(pkgArchs map[string]*pkgData) {
 	}
 
 	postMerge(func(arch string) bool { return true }, pkgArchs, "all")
-	postMerge(func(arch string) bool { return len(arch) >= 4 && arch[len(arch)-4:] == "-cgo" }, pkgArchs, "cgo")
-	postMerge(func(arch string) bool { return len(arch) < 4 || arch[len(arch)-4:] != "-cgo" }, pkgArchs, "nocgo")
-	postMerge(func(arch string) bool { return unixOS[strings.Split(arch, "-")[0]] }, pkgArchs, "unix")
-
 	for archStr := range knownArch {
-		postMerge(func(arch string) bool {
-			split := strings.Split(arch, "-")
-			return len(split) > 1 && split[1] == archStr
-		}, pkgArchs, archStr)
+		postMerge(func(arch string) bool { return strings.Split(arch, "-")[1] == archStr }, pkgArchs, archStr)
 	}
-
 	for osStr := range knownOS {
 		postMerge(func(arch string) bool { return strings.Split(arch, "-")[0] == osStr }, pkgArchs, osStr)
+	}
+	postMerge(func(arch string) bool { return unixOS[strings.Split(arch, "-")[0]] }, pkgArchs, "unix")
+	postMerge(func(arch string) bool { return arch[len(arch)-4:] == "-cgo" }, pkgArchs, "cgo")
+
+	for osStr := range knownOS {
 		postMerge(func(arch string) bool {
 			split := strings.Split(arch, "-")
 			return split[0] == osStr && split[len(split)-1] == "cgo"
 		}, pkgArchs, osStr+"-cgo")
 	}
 
-	// additional cleanup of empty architectures
-	var emptyKeys []string
-
-	for arch, pkgD := range pkgArchs {
-		if pkgD.empty() {
-			emptyKeys = append(emptyKeys, arch)
-		}
+	for archStr := range knownArch {
+		postMerge(func(arch string) bool {
+			split := strings.Split(arch, "-")
+			return split[1] == archStr && split[len(split)-1] == "cgo"
+		}, pkgArchs, archStr+"-cgo")
 	}
 
-	for _, key := range emptyKeys {
-		delete(pkgArchs, key)
+	// additional cleanup of empty architectures
+	for arch, pkgD := range pkgArchs {
+		if pkgD.empty() {
+			delete(pkgArchs, arch)
+		}
 	}
 }
 
@@ -974,25 +991,32 @@ func postMerge(archFilter func(string) bool, pkgArchs map[string]*pkgData, name 
 		}
 	}
 
-	// found nothing
 	if firstPkg || filtered.empty() {
+		// found nothing
 		return
 	}
 
-	var emptyKeys []string
-
-	// remove duplicates
+	// remove false positives
 	for arch, pkgD := range pkgArchs {
-		if archFilter(arch) {
-			pkgD.not(filtered)
-			if pkgD.empty() {
-				emptyKeys = append(emptyKeys, arch)
-			}
+		if architectureSet.Contains(arch) && !archFilter(arch) {
+			filtered.andNot(pkgD)
 		}
 	}
 
-	for _, key := range emptyKeys {
-		delete(pkgArchs, key)
+	if filtered.empty() {
+		// only false positives
+		return
+	}
+
+	// remove duplicates
+	for arch, pkgD := range pkgArchs {
+		if !(architectureSet.Contains(arch) && archFilter(arch)) {
+			continue
+		}
+		pkgD.not(filtered)
+		if pkgD.empty() {
+			delete(pkgArchs, arch)
+		}
 	}
 
 	pkgArchs[name] = filtered
