@@ -1,9 +1,11 @@
 # currently specific to AMD64 (and possibly Linux)
 
-from itertools import chain
+from itertools import chain, takewhile
 from collections import defaultdict
 import json
 import os.path
+import glob
+import traceback
 
 from ghidra.program.model.listing import VariableStorage, ParameterImpl
 from ghidra.program.model.symbol import SourceType
@@ -190,15 +192,14 @@ language_id = currentProgram.getLanguageID().toString()
 if language_id.startswith('x86') and ptr_size == 8:
     integer_registers = ['RAX', 'RBX', 'RCX',
                          'RDI', 'RSI', 'R8', 'R9', 'R10', 'R11']
-    space_reg = 'RAX'
     float_registers = ['XMM{}'.format(i) for i in range(15)]
 elif language_id.startswith('AARCH64'):
     integer_registers = ['x{}'.format(i) for i in range(16)]
     float_registers = ['d{}'.format(i) for i in range(16)]
-    space_reg = 'x0'
 else:
     raise Exception('unhandled platform: {}'.format(language_id))
 
+space_reg = integer_registers[0]
 
 # no passing args in registers, fallback to abi0
 if version_tup < (1, 17):
@@ -207,8 +208,6 @@ if version_tup < (1, 17):
 
 
 # Instead of creating a new unique space or using the OTHER_SPACE address space, we are using the address space of the first integer register.
-# space = currentProgram.getAddressFactory().getUniqueSpace()
-# space = ghidra.program.model.address.AddressSpace.OTHER_SPACE
 space = currentProgram.getRegister(space_reg).getAddressSpace()
 
 # A dictionary named 'regmap' is created. The keys are the register names (strings), such as "RAX", and the values are the corresponding Ghidra register objects.
@@ -470,7 +469,7 @@ def get_dynamic_type(types):
 
     t = data.StructureDataType(name, 0)
     for i, typename in enumerate(types):
-        el_type, el_size, _el_align = get_type(typename)
+        el_type, el_size, _ = get_type(typename)
         el_name = 'elem_{}_{}'.format(i + 1, typename)
         t.add(el_type, el_size, el_name, None)
 
@@ -614,9 +613,14 @@ def assign_type(type_name, I, FP, stack_offset):
     reg_info = assign_registers(I, FP, datatype)
     if reg_info is None:  # assign to stack
         # "If step 3 failed, [...] add T to the stack sequence S"
-        el_offset = align(stack_offset, el_align)
-        storage = [el_offset, el_size]
-        stack_offset = el_offset + el_size
+        if results:
+            el_offset = align(stack_offset + el_size, el_align)
+            storage = [-el_offset, el_size]
+            stack_offset = el_offset + el_size
+        else:
+            el_offset = align(stack_offset, el_align)
+            storage = [el_offset, el_size]
+            stack_offset = el_offset + el_size
     else:  # assign to register
         storage, I, FP = reg_info
 
@@ -700,13 +704,39 @@ def get_results(result_types, stack_offset):
             [result['DataType'] for result in result_types])
 
     for param in result_types:
-        storage, datatype, I, FP, stack_offset = assign_type(
+        storage, _, I, FP, stack_offset = assign_type(
             param['DataType'], I, FP, stack_offset)
         varnodes.extend(storage.getVarnodes())
+
+    merge_to_stack(varnodes)
 
     storage = VariableStorage(currentProgram, *varnodes)
 
     return ret_datatype, storage
+
+
+def merge_to_stack(varnodes):
+    """
+    Ghidra wants the last stack arguments, if any, to be a single argument;
+    appease it
+    """
+    stack_results = list(
+        takewhile(
+            lambda node: not node.isRegister(),
+            varnodes[::-1],
+        )
+    )[::-1]
+
+    if len(stack_results) < 2:
+        return
+
+    # size = (stack_results[-1].getOffset() + stack_results[-1].getSize()) - stack_results[0].getOffset()
+    size = sum(node.getSize() for node in stack_results)
+    if size == 0:
+        return
+    offset = stack_results[-1].getOffset()
+    node = VariableStorage(currentProgram, offset, size).getVarnodes()[0]
+    varnodes[-len(stack_results):] = [node]
 
 
 def set_storage(func, param_types, result_types):
@@ -738,13 +768,15 @@ def set_storage(func, param_types, result_types):
     # "Add a pointer-alignment field to S"
         stack_offset = align(stack_offset, ptr_size)
     except:
+        traceback.print_exc()
         return
     # "For each result R of F, assign R"
     try:
         ret_datatype, ret_storage = get_results(result_types, stack_offset)
         func.setReturn(ret_datatype, ret_storage, SourceType.USER_DEFINED)
     except:
-        pass
+        traceback.print_exc()
+        return
 
 
 def recursive_struct_unpack(datatype):
