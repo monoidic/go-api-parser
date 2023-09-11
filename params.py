@@ -6,6 +6,9 @@ import json
 import os.path
 import glob
 import traceback
+import subprocess
+import tempfile
+import shutil
 
 from ghidra.program.model.listing import VariableStorage, ParameterImpl
 from ghidra.program.model.symbol import SourceType
@@ -15,24 +18,25 @@ from ghidra.program.model.pcode import Varnode
 from ghidra.program.model import data
 
 
-
 GO_MAXVER = 23
 
 versions = ['go1.%d' % num for num in range(GO_MAXVER+1)[::-1]]
 
-#Find section by name
+
+# Find section by name
 def getSection(name):
     block = getMemoryBlock(name)
     if block is None:
-        print "No %s section found." % name
+        print("No %s section found." % name)
         return None
 
     start = block.getStart()
     end = block.getEnd()
-    print "%s [start: 0x%x, end: 0x%x]" % (block.getName(), start.getOffset(), end.getOffset())
+    print("%s [start: 0x%x, end: 0x%x]" % (block.getName(), start.getOffset(), end.getOffset()))
     return start, end
 
-#Find version by string search in specific memory block
+
+# Find version by string search in specific memory block
 def findVersion(name):
     section = getSection(name)
     if section is None:
@@ -42,12 +46,13 @@ def findVersion(name):
 
     for version in versions:
         if findBytes(address_set, version, 1, 1):
-            print "Version found"
-            print version
+            print("Version found")
+            print(version)
             return version
 
     print('version not found in section')
     return None
+
 
 def apply_delta(a, delta):
     """
@@ -55,10 +60,10 @@ def apply_delta(a, delta):
 
     Args:
         a (dict): The original dictionary to modify.
-        delta (dict): The changes to apply to the original dictionary. This should be in the same 
-                      format as the output of the `get_delta` function. That is, the keys are paths 
-                      (formatted as 'key1->key2->key3') to the values that should be changed, and 
-                      the values are the new values. If the new value is "_DELETED_", the key at 
+        delta (dict): The changes to apply to the original dictionary. This should be in the same
+                      format as the output of the `get_delta` function. That is, the keys are paths
+                      (formatted as 'key1->key2->key3') to the values that should be changed, and
+                      the values are the new values. If the new value is "_DELETED_", the key at
                       that path is deleted.
 
     Returns:
@@ -88,6 +93,112 @@ def apply_delta(a, delta):
     return a
 
 
+def pkg_mod_info():
+    p = subprocess.Popen(
+        ['go', 'version', '-m', currentProgram.executablePath],
+        stdout=subprocess.PIPE,
+    )
+    stdout, _ = p.communicate()
+    p.wait()
+
+    version = stdout.split('\n')[0].split()[-1]
+    deps = [
+        split[2] + '@' + split[3]
+        for split in (
+            line.split('\t')
+            for line in stdout.split('\n')
+            if '\tdep\t' in line
+        )
+    ]
+    return version, deps
+
+
+def go_env(s):
+    p = subprocess.Popen(['go', 'env', s], stdout=subprocess.PIPE)
+    stdout, _ = p.communicate()
+    p.wait()
+    return stdout[:-1]
+
+
+def set_git_revision(dir, tag):
+    p = subprocess.Popen(['git', '-C', dir, 'checkout', tag])
+    if p.wait() != 0:
+        raise Exception('unable to set git revision')
+
+def setup_fake_goroot(version):
+    fake_goroot = tempfile.mkdtemp()
+    goroot = go_env('GOROOT')
+    base, dirs, files = next(os.walk(goroot))
+    for entry in dirs + files:
+        target = os.path.join(goroot, entry)
+        link_path = os.path.join(fake_goroot, entry)
+        os.symlink(target, link_path)
+
+    go_src_path = os.path.expanduser('~/src/go')
+    set_git_revision(go_src_path, version)
+    os.remove(os.path.join(fake_goroot, 'src'))
+    os.symlink(os.path.join(go_src_path, 'src'), os.path.join(fake_goroot, 'src'))
+
+    return fake_goroot
+
+
+def fake_pkg(deps):
+    dir = tempfile.mkdtemp()
+    p = subprocess.Popen(
+        ['go', '-C', dir, 'mod', 'init', 'x'],
+    )
+    if p.wait() != 0:
+        raise Exception('failed to init mod')
+    args = ['go', '-C', dir, 'get']
+    args.extend(deps)
+    p = subprocess.Popen(args)
+    if p.wait() != 0:
+        raise Exception('failed to install deps')
+    shutil.rmtree(dir)
+
+
+def get_dep_definition(api_parser, dep_dir, version):
+    env = os.environ.copy()
+    env['version'] = version
+    with tempfile.NamedTemporaryFile() as json_file:
+        p = subprocess.Popen(
+            [api_parser, dep_dir, json_file.name],
+            env=env,
+        )
+        # TODO handle packages without go.mod
+        if p.wait() != 0:
+            raise Exception('failed to get dep info')
+        json_file.seek(0)
+        return json.load(json_file)
+
+
+def get_dep_definitions(deps, version):
+    fake_goroot = setup_fake_goroot(version)
+    fake_pkg(deps)
+
+    api_parser_path = os.path.expanduser('~/src/go-api-parser/go-api-parser')
+    gomodcache = go_env('GOMODCACHE')
+    for dep in deps:
+        dir = os.path.join(gomodcache, dep)
+        print(dep)
+        try:
+            yield get_dep_definition(api_parser_path, dir, version)
+        except Exception:
+            traceback.print_exc()
+
+    shutil.rmtree(fake_goroot)
+
+
+def merge_definitions(current, new):
+    for arch, arch_d in new.items():
+        if arch not in current:
+            current[arch] = arch_d
+            continue
+        current_arch = current[arch]
+        for subcat, subcat_d in arch_d.items():
+            current_arch[subcat].update(subcat_d)
+
+
 unix_os = ['aix', 'android', 'darwin', 'dragonfly', 'freebsd', 'hurd', 'illumos', 'ios', 'linux', 'netbsd', 'openbsd', 'solaris']
 
 def matching_architectures(os, arch, cgo):
@@ -98,8 +209,7 @@ def matching_architectures(os, arch, cgo):
         matches.extend(['cgo', '{}-{}-cgo'.format(os, arch)])
     return matches
 
-# TODO work with older Go (e.g go1.14), Windows etc.
-version = findVersion('.go.buildinfo')
+version, deps = pkg_mod_info()
 
 version_tup = tuple(int(num) for num in version[2:].split('.'))
 
@@ -116,8 +226,6 @@ indexes = [
 end_index = indexes.index(version) + 1
 matches = matches[:end_index]
 
-print(matches)
-
 with open(matches[0]) as fd:
     definitions = json.load(fd)
 
@@ -125,6 +233,9 @@ for match in matches[1:]:
     with open(match) as fd:
         delta = json.load(fd)
     apply_delta(definitions, delta)
+
+for dep_definition in get_dep_definitions(deps, version):
+    merge_definitions(definitions, dep_definition)
 
 # current architecture, for architectures-specific functions
 # TODO Ghidra can report platform info, get this dynamically
@@ -574,7 +685,7 @@ def assign_registers(I, FP, datatype):
     return out, I, FP
 
 
-def assign_type(type_name, I, FP, stack_offset):
+def assign_type(type_name, I, FP, stack_offset, results=False, func_offset=0):
     """
     This function attempts to assign a type either to a register or to the stack. It first attempts to assign
     the type to a register. If assignment to a register fails (for instance, if the type size is too large for
@@ -614,7 +725,7 @@ def assign_type(type_name, I, FP, stack_offset):
     if reg_info is None:  # assign to stack
         # "If step 3 failed, [...] add T to the stack sequence S"
         if results:
-            el_offset = align(stack_offset + el_size, el_align)
+            el_offset = align(func_offset + stack_offset + el_size, el_align)
             storage = [-el_offset, el_size]
             stack_offset = el_offset + el_size
         else:
@@ -667,7 +778,7 @@ def get_params(param_types):
     return result_params, stack_offset
 
 
-def get_results(result_types, stack_offset):
+def get_results(result_types, stack_offset, func_offset):
     """
     This function processes a list of result types and assigns each one to a register or stack, similar to `get_params`.
     Since Ghidra only handles a single return value, the function returns a dynamically generated struct type
@@ -680,6 +791,8 @@ def get_results(result_types, stack_offset):
         containing at least a 'DataType' key.
     stack_offset : int
         The initial stack offset before assigning the result types.
+    func_offset: int
+        Additional per-function offset needed for results.
 
     Returns
     -------
@@ -705,7 +818,13 @@ def get_results(result_types, stack_offset):
 
     for param in result_types:
         storage, _, I, FP, stack_offset = assign_type(
-            param['DataType'], I, FP, stack_offset)
+            param['DataType'],
+            I,
+            FP,
+            stack_offset,
+            results=True,
+            func_offset=func_offset,
+        )
         varnodes.extend(storage.getVarnodes())
 
     merge_to_stack(varnodes)
@@ -730,7 +849,6 @@ def merge_to_stack(varnodes):
     if len(stack_results) < 2:
         return
 
-    # size = (stack_results[-1].getOffset() + stack_results[-1].getSize()) - stack_results[0].getOffset()
     size = sum(node.getSize() for node in stack_results)
     if size == 0:
         return
@@ -772,7 +890,8 @@ def set_storage(func, param_types, result_types):
         return
     # "For each result R of F, assign R"
     try:
-        ret_datatype, ret_storage = get_results(result_types, stack_offset)
+        func_offset = func.stackFrame.frameSize - func.stackFrame.parameterOffset - func.stackFrame.parameterSize
+        ret_datatype, ret_storage = get_results(result_types, stack_offset, func_offset)
         func.setReturn(ret_datatype, ret_storage, SourceType.USER_DEFINED)
     except:
         traceback.print_exc()
