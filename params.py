@@ -144,20 +144,56 @@ def setup_fake_goroot(version):
 
 def fake_pkg(deps):
     dir = tempfile.mkdtemp()
-    p = subprocess.Popen(
-        ['go', '-C', dir, 'mod', 'init', 'x'],
-    )
-    if p.wait() != 0:
-        raise Exception('failed to init mod')
-    args = ['go', '-C', dir, 'get']
-    args.extend(deps)
-    p = subprocess.Popen(args)
-    if p.wait() != 0:
-        raise Exception('failed to install deps')
-    shutil.rmtree(dir)
+    try:
+        p = subprocess.Popen(
+            ['go', '-C', dir, 'mod', 'init', 'x'],
+        )
+        if p.wait() != 0:
+            raise Exception('failed to init mod')
+        args = ['go', '-C', dir, 'get']
+        args.extend(deps)
+        p = subprocess.Popen(args)
+        if p.wait() != 0:
+            raise Exception('failed to install deps')
+    finally:
+        shutil.rmtree(dir)
 
 
-def get_dep_definition(api_parser, dep_dir, version):
+def get_dep_definition(api_parser, dep_dir, version, dep):
+    go_mod_path = os.path.join(dep_dir, 'go.mod')
+    if os.path.isfile(go_mod_path):
+        return run_api_parser(api_parser, dep_dir, version)
+
+    tmpdir = tempfile.mkdtemp()
+    old_dep_dir = dep_dir
+    dep_dir = os.path.join(tmpdir, 'pkg')
+    try:
+        shutil.copytree(old_dep_dir, dep_dir)
+        recursive_dir_chmod(dep_dir, 0o700)
+
+        pkg_name = dep.split('@')[0]
+
+        for extra_args in [
+            ['mod', 'init', pkg_name],
+            ['mod', 'tidy'],
+        ]:
+            args = ['go', '-C', dep_dir]
+            args.extend(extra_args)
+            p = subprocess.Popen(args)
+            if p.wait() != 0:
+                raise Exception('failed to run {}'.format(args))
+
+        return run_api_parser(api_parser, dep_dir, version)
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def recursive_dir_chmod(path, mode):
+    for dir, _, _ in os.walk(path):
+        os.chmod(dir, mode)
+
+
+def run_api_parser(api_parser, dep_dir, version):
     env = os.environ.copy()
     env['version'] = version
     with tempfile.NamedTemporaryFile() as json_file:
@@ -165,7 +201,6 @@ def get_dep_definition(api_parser, dep_dir, version):
             [api_parser, dep_dir, json_file.name],
             env=env,
         )
-        # TODO handle packages without go.mod
         if p.wait() != 0:
             raise Exception('failed to get dep info')
         json_file.seek(0)
@@ -182,7 +217,7 @@ def get_dep_definitions(deps, version):
         dir = os.path.join(gomodcache, dep)
         print(dep)
         try:
-            yield get_dep_definition(api_parser_path, dir, version)
+            yield get_dep_definition(api_parser_path, dir, version, dep)
         except Exception:
             traceback.print_exc()
 
@@ -551,7 +586,6 @@ def get_struct(name):
 dynamic_type_map = {}
 
 
-# TODO handle params partially passed on the stack, partially in registers
 def get_dynamic_type(types):
     """
     This function retrieves or creates a composite type that combines the
