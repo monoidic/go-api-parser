@@ -109,6 +109,7 @@ def pkg_mod_info():
             for line in stdout.split('\n')
             if '\tdep\t' in line
         )
+        if '.' in split[2].split('/', 1)[0]
     ]
     return version, deps
 
@@ -209,19 +210,20 @@ def run_api_parser(api_parser, dep_dir, version):
 
 def get_dep_definitions(deps, version):
     fake_goroot = setup_fake_goroot(version)
-    fake_pkg(deps)
+    try:
+        fake_pkg(deps)
 
-    api_parser_path = os.path.expanduser('~/src/go-api-parser/go-api-parser')
-    gomodcache = go_env('GOMODCACHE')
-    for dep in deps:
-        dir = os.path.join(gomodcache, dep)
-        print(dep)
-        try:
-            yield get_dep_definition(api_parser_path, dir, version, dep)
-        except Exception:
-            traceback.print_exc()
-
-    shutil.rmtree(fake_goroot)
+        api_parser_path = os.path.expanduser('~/src/go-api-parser/go-api-parser')
+        gomodcache = go_env('GOMODCACHE')
+        for dep in deps:
+            dir = os.path.join(gomodcache, dep)
+            print(dep)
+            try:
+                yield get_dep_definition(api_parser_path, dir, version, dep)
+            except Exception:
+                traceback.print_exc()
+    finally:
+        shutil.rmtree(fake_goroot)
 
 
 def merge_definitions(current, new):
