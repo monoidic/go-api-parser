@@ -209,6 +209,8 @@ def run_api_parser(api_parser, dep_dir, version):
 
 
 def get_dep_definitions(deps, version):
+    if not deps:
+        return
     fake_goroot = setup_fake_goroot(version)
     try:
         fake_pkg(deps)
