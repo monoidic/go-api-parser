@@ -757,7 +757,7 @@ def assign_type(type_name, I, FP, stack_offset, results=False, func_offset=0):
     datatype, el_size, el_align = get_type(type_name)
     if el_size == 0:
         # "If T has zero size, add T to the stack sequence S and return."
-        return VariableStorage(currentProgram, stack_offset, 0), datatype, I, FP, stack_offset
+        return None, datatype, I, FP, stack_offset
     # "Try to register-assign V."
     reg_info = assign_registers(I, FP, datatype)
     if reg_info is None:  # assign to stack
@@ -799,12 +799,12 @@ def get_params(param_types):
     stack_offset = ptr_size
     I = 0
     FP = 0
-    # print(param_types)
 
     for param in param_types:
         storage, datatype, I, FP, stack_offset = assign_type(
             param['DataType'], I, FP, stack_offset)
-        # print('storage = {}, datatype = {}, I = {}, FP = {}, stack_offset = {}'.format(storage, datatype, I, FP, stack_offset))
+        if not storage:
+            continue
 
         result_params.append(ParameterImpl(
             param['Name'],
