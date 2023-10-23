@@ -347,7 +347,8 @@ elif language_id.startswith('AARCH64'):
     integer_registers = ['x{}'.format(i) for i in range(16)]
     float_registers = ['d{}'.format(i) for i in range(16)]
 else:
-    raise Exception('unhandled platform: {}'.format(language_id))
+    integer_registers = []
+    float_registers = []
 
 space_reg = integer_registers[0]
 
