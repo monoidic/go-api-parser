@@ -350,7 +350,7 @@ else:
     integer_registers = []
     float_registers = []
 
-space_reg = integer_registers[0]
+#space_reg = integer_registers[0] if integer_registers else ''
 
 # no passing args in registers, fallback to abi0
 if version_tup < (1, 17):
@@ -359,7 +359,7 @@ if version_tup < (1, 17):
 
 
 # Instead of creating a new unique space or using the OTHER_SPACE address space, we are using the address space of the first integer register.
-space = currentProgram.getRegister(space_reg).getAddressSpace()
+#space = currentProgram.getRegister(space_reg).getAddressSpace()
 
 # A dictionary named 'regmap' is created. The keys are the register names (strings), such as "RAX", and the values are the corresponding Ghidra register objects.
 # The registers are retrieved from the currentProgram.
