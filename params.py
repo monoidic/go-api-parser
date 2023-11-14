@@ -249,6 +249,8 @@ def matching_architectures(os, arch, cgo):
     return matches
 
 version, deps = pkg_mod_info()
+print 'version', version
+print 'deps', deps
 
 version_tup = tuple(int(num) for num in version[2:].split('.'))
 
@@ -774,6 +776,8 @@ def assign_type(type_name, I, FP, stack_offset, results=False, func_offset=0):
     else:  # assign to register
         storage, I, FP = reg_info
 
+    if not results:
+        storage = list(storage)[::-1]
     return VariableStorage(currentProgram, *storage), datatype, I, FP, stack_offset
 
 
@@ -867,6 +871,7 @@ def get_results(result_types, stack_offset, func_offset):
         varnodes.extend(storage.getVarnodes())
 
     merge_to_stack(varnodes)
+    varnodes.reverse()
 
     storage = VariableStorage(currentProgram, *varnodes)
 
