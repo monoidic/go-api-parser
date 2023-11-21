@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 
@@ -65,10 +66,12 @@ func getArchitectures() (out []string) {
 	out = []string{
 		"darwin-amd64",
 		"darwin-amd64-cgo",
-		"freebsd-386",
-		"freebsd-386-cgo",
-		"freebsd-amd64",
-		"freebsd-amd64-cgo",
+		/*
+			"freebsd-386",
+			"freebsd-386-cgo",
+			"freebsd-amd64",
+			"freebsd-amd64-cgo",
+		*/
 		"linux-386",
 		"linux-386-cgo",
 		"windows-386",
@@ -79,7 +82,7 @@ func getArchitectures() (out []string) {
 		"linux-amd64-cgo",
 		// should be fine above here
 		// TODO track these down somehow
-		"linux-ppc64",
+		/*"linux-ppc64",*/
 		// // added in 1.11, but this is not going to be useful here
 		//"js-wasm",
 	}
@@ -91,106 +94,118 @@ func getArchitectures() (out []string) {
 		{
 			// https://go.dev/doc/go1.1#platforms
 			version: "v1.1",
-			archs: []string{
-				"freebsd-arm", "netbsd-386", "netbsd-386-cgo", "netbsd-amd64",
-				"netbsd-amd64-cgo", "netbsd-arm", "netbsd-arm-cgo", "openbsd-386", "openbsd-386-cgo",
-				"openbsd-amd64", "openbsd-amd64-cgo", "linux-arm-cgo",
+			archs:   []string{
+				/*
+					"freebsd-arm", "netbsd-386", "netbsd-386-cgo", "netbsd-amd64",
+					"netbsd-amd64-cgo", "netbsd-arm", "netbsd-arm-cgo", "openbsd-386", "openbsd-386-cgo",
+					"openbsd-amd64", "openbsd-amd64-cgo", "linux-arm-cgo",
+				*/
 			}},
 		{
 			// ???
 			version: "v1.2",
-			archs:   []string{"dragonfly-amd64", "dragonfly-amd64-cgo"},
+			archs:   []string{ /*"dragonfly-amd64", "dragonfly-amd64-cgo"*/ },
 		},
 		{
 			// https://go.dev/doc/go1.3#os
 			version: "v1.3",
-			archs:   []string{"plan9-386", "solaris-amd64"},
+			archs:   []string{ /*"plan9-386", "solaris-amd64"*/ },
 		},
 		{
 			// https://go.dev/doc/go1.4#os
 			version: "v1.4",
-			archs: []string{
-				"android-arm", "android-arm-cgo", "plan9-amd64", "android-amd64",
-				"android-amd64-cgo", "android-arm64", "android-arm64-cgo",
+			archs:   []string{
+				/*
+					"android-arm", "android-arm-cgo", "plan9-amd64", "android-amd64",
+					"android-amd64-cgo", "android-arm64", "android-arm64-cgo",
+				*/
 			},
 		},
 		{
 			// https://go.dev/doc/go1.5#ports
 			version: "v1.5",
 			archs: []string{
-				"darwin-arm64", "darwin-arm64-cgo", "linux-arm64",
-				"linux-arm64-cgo", "linux-ppc64le", "linux-ppc64le-cgo", "solaris-amd64-cgo",
+				/*
+					"darwin-arm64", "darwin-arm64-cgo", "linux-arm64",
+					"linux-arm64-cgo", "linux-ppc64le", "linux-ppc64le-cgo", "solaris-amd64-cgo",
+				*/
+				"darwin-arm64", "darwin-arm64-cgo",
+				"linux-arm64", "linux-arm64-cgo",
 			},
 		},
 		{
 			// https://go.dev/doc/go1.6#ports
 			version: "v1.6",
-			archs: []string{
-				"linux-mips64", "linux-mips64-cgo", "linux-mips64le", "linux-mips64le-cgo",
-				"android-386", "android-386-cgo",
+			archs:   []string{
+				/*
+					"linux-mips64", "linux-mips64-cgo", "linux-mips64le", "linux-mips64le-cgo",
+					"android-386", "android-386-cgo",
+				*/
 			},
 		},
 		{
 			// https://go.dev/doc/go1.7#ports
 			version: "v1.7",
-			archs:   []string{"linux-s390x", "linux-s390x-cgo", "plan9-arm"},
+			archs:   []string{ /*"linux-s390x", "linux-s390x-cgo", "plan9-arm"*/ },
 		},
 		{
 			// https://go.dev/doc/go1.8#ports
 			version: "v1.8",
-			archs:   []string{"linux-mips", "linux-mips-cgo", "linux-mipsle", "linux-mipsle-cgo"},
+			archs:   []string{ /*"linux-mips", "linux-mips-cgo", "linux-mipsle", "linux-mipsle-cgo"*/ },
 		},
 		{
 			// ???
 			version: "v1.11",
-			archs:   []string{"linux-riscv64"},
+			archs:   []string{ /*"linux-riscv64"*/ },
 		},
 		{
 			// https://go.dev/doc/go1.12#ports
 			version: "v1.12",
 			// go tool dist list -json | jq '.[] | select(.CgoSupported == false and .GOARCH == "ppc64")'
 			// does linux-ppc64 support CGO or not?
-			archs: []string{"linux-ppc64-cgo", "windows-arm", "aix-ppc64", "openbsd-arm-cgo"},
+			archs: []string{ /*"linux-ppc64-cgo", "windows-arm", "aix-ppc64", "openbsd-arm-cgo"*/ },
 		},
 		{
 			// https://go.dev/doc/go1.13#ports
 			version: "v1.13",
-			archs: []string{
-				"aix-ppc64-cgo", "illumos-amd64", "illumos-amd64-cgo", "freebsd-arm-cgo",
-				"netbsd-arm64", "netbsd-arm64-cgo", "openbsd-arm64", "openbsd-arm64-cgo",
+			archs:   []string{
+				/*
+					"aix-ppc64-cgo", "illumos-amd64", "illumos-amd64-cgo", "freebsd-arm-cgo",
+					"netbsd-arm64", "netbsd-arm64-cgo", "openbsd-arm64", "openbsd-arm64-cgo",
+				*/
 			},
 		},
 		{
 			// https://go.dev/doc/go1.14#ports
 			version: "v1.14",
-			archs:   []string{"freebsd-arm64", "freebsd-arm64-cgo"},
+			archs:   []string{ /*"freebsd-arm64", "freebsd-arm64-cgo"*/ },
 		},
 		{
 			// https://go.dev/doc/go1.15#ports
 			version: "v1.15",
-			archs:   []string{"openbsd-arm"},
+			archs:   []string{ /*"openbsd-arm"*/ },
 		},
 		{
 			// https://go.dev/doc/go1.16#ports
 			version: "v1.16",
-			archs: []string{
-				"ios-arm64", "ios-arm64-cgo", "ios-amd64", "ios-amd64-cgo", "openbsd-mips64", "linux-riscv64-cgo",
+			archs:   []string{
+				/*"ios-arm64", "ios-arm64-cgo", "ios-amd64", "ios-amd64-cgo", "openbsd-mips64", "linux-riscv64-cgo",*/
 			},
 		},
 		{
 			// https://go.dev/doc/go1.17#ports
 			version: "v1.17",
-			archs:   []string{"windows-arm64", "windows-arm64-cgo", "openbsd-mips64-cgo"},
+			archs:   []string{"windows-arm64", "windows-arm64-cgo" /*"openbsd-mips64-cgo"*/},
 		},
 		{
 			// https://go.dev/doc/go1.19#ports
 			version: "v1.19",
-			archs:   []string{"linux-loong64", "linux-loong64-cgo"},
+			archs:   []string{ /*"linux-loong64", "linux-loong64-cgo"*/ },
 		},
 		{
 			// https://go.dev/doc/go1.20#ports
 			version: "v1.20",
-			archs:   []string{"freebsd-riscv64", "freebsd-riscv64-cgo"},
+			archs:   []string{ /*"freebsd-riscv64", "freebsd-riscv64-cgo"*/ },
 		},
 		// wasip1-wasm added in 1.21, but not interesting here
 	}
@@ -217,20 +232,12 @@ type stack[T any] struct {
 
 func (s *stack[T]) pushMultipleRev(l []T) {
 	// reverse sorted order, to pop in "the right" order
-	reverseSlice(l)
+	slices.Reverse(l)
 	s.l = append(s.l, l...)
 }
 
 func (s *stack[T]) push(e T) {
 	s.l = append(s.l, e)
-}
-
-func reverseSlice[T any](l []T) {
-	length := len(l)
-	for i := 0; i < length/2; i++ {
-		j := length - i - 1
-		l[i], l[j] = l[j], l[i]
-	}
 }
 
 func (s *stack[T]) pop() (T, bool) {
@@ -580,18 +587,6 @@ type namedType struct {
 	DataType string
 }
 
-func tupleCmp(x, y []namedType) bool {
-	if len(x) != len(y) {
-		return false
-	}
-	for i, xEl := range x {
-		if yEl := y[i]; xEl != yEl {
-			return false
-		}
-	}
-	return true
-}
-
 type funcData struct {
 	Params  []namedType
 	Results []namedType
@@ -601,8 +596,8 @@ func (x funcData) equals(yI equalsI) bool {
 	y := yI.(funcData)
 	return len(x.Params) == len(y.Params) &&
 		len(x.Results) == len(y.Results) &&
-		tupleCmp(x.Params, y.Params) &&
-		tupleCmp(x.Results, y.Results)
+		slices.Equal(x.Params, y.Params) &&
+		slices.Equal(x.Results, y.Results)
 }
 
 type typeData struct {
@@ -618,7 +613,7 @@ type structDef struct {
 }
 
 func (x structDef) equals(yI equalsI) bool {
-	return tupleCmp(x.Fields, yI.(structDef).Fields)
+	return slices.Equal(x.Fields, yI.(structDef).Fields)
 }
 
 type alias struct {
@@ -659,11 +654,17 @@ type equalsI interface {
 
 func mapAnd[V equalsI](x, y map[string]V) map[string]V {
 	out := make(map[string]V)
+	if len(x) > len(y) {
+		// swap to iterate over shorter map
+		// (order is irrelevant here)
+		x, y = y, x
+	}
 	for name, xV := range x {
 		if yV, ok := y[name]; ok && xV.equals(yV) {
 			out[name] = xV
 		}
 	}
+
 	return out
 }
 
@@ -678,51 +679,71 @@ func (pkg *pkgData) and(y *pkgData) *pkgData {
 	}
 }
 
-func mapAndNot[V equalsI](x, y map[string]V) {
+func mapAndNot[V equalsI](x, y map[string]V) map[string]V {
+	out := make(map[string]V)
 	for name, xV := range x {
-		if yV, ok := y[name]; ok && xV.equals(yV) {
-			delete(x, name)
+		if yV, ok := y[name]; !(ok && xV.equals(yV)) {
+			out[name] = xV
 		}
 	}
+
+	return out
 }
 
 // remove keys from pkg that have an entry with an equal value in y
-func (pkg *pkgData) andNot(y *pkgData) {
-	mapAndNot(pkg.Funcs, y.Funcs)
-	mapAndNot(pkg.Types, y.Types)
-	mapAndNot(pkg.Structs, y.Structs)
-	mapAndNot(pkg.Aliases, y.Aliases)
-	mapAndNot(pkg.Interfaces, y.Interfaces)
+func (pkg *pkgData) andNot(y *pkgData) *pkgData {
+	return &pkgData{
+		Funcs:      mapAndNot(pkg.Funcs, y.Funcs),
+		Types:      mapAndNot(pkg.Types, y.Types),
+		Structs:    mapAndNot(pkg.Structs, y.Structs),
+		Aliases:    mapAndNot(pkg.Aliases, y.Aliases),
+		Interfaces: mapAndNot(pkg.Interfaces, y.Interfaces),
+	}
 }
 
-func mapMerge[T any](x, y map[string]T) {
-	for k, v := range y {
-		x[k] = v
+func mapMerge[T any](x, y map[string]T) map[string]T {
+	out := make(map[string]T)
+
+	for _, m := range []map[string]T{x, y} {
+		for k, v := range m {
+			out[k] = v
+		}
 	}
+
+	return out
 }
 
 // merge y into pkg
-func (pkg *pkgData) merge(y *pkgData) {
-	mapMerge(pkg.Funcs, y.Funcs)
-	mapMerge(pkg.Types, y.Types)
-	mapMerge(pkg.Structs, y.Structs)
-	mapMerge(pkg.Aliases, y.Aliases)
-	mapMerge(pkg.Interfaces, y.Interfaces)
-}
-
-func mapNot[T any](x, y map[string]T) {
-	for k := range y {
-		delete(x, k)
+func (pkg *pkgData) merge(y *pkgData) *pkgData {
+	return &pkgData{
+		Funcs:      mapMerge(pkg.Funcs, y.Funcs),
+		Types:      mapMerge(pkg.Types, y.Types),
+		Structs:    mapMerge(pkg.Structs, y.Structs),
+		Aliases:    mapMerge(pkg.Aliases, y.Aliases),
+		Interfaces: mapMerge(pkg.Interfaces, y.Interfaces),
 	}
 }
 
+func mapNot[T any](x, y map[string]T) map[string]T {
+	out := make(map[string]T)
+	for k, v := range x {
+		if _, ok := y[k]; !ok {
+			out[k] = v
+		}
+	}
+
+	return out
+}
+
 // remove keys existing in y from pkg
-func (pkg *pkgData) not(y *pkgData) {
-	mapNot(pkg.Funcs, y.Funcs)
-	mapNot(pkg.Types, y.Types)
-	mapNot(pkg.Structs, y.Structs)
-	mapNot(pkg.Aliases, y.Aliases)
-	mapNot(pkg.Interfaces, y.Interfaces)
+func (pkg *pkgData) not(y *pkgData) *pkgData {
+	return &pkgData{
+		Funcs:      mapNot(pkg.Funcs, y.Funcs),
+		Types:      mapNot(pkg.Types, y.Types),
+		Structs:    mapNot(pkg.Structs, y.Structs),
+		Aliases:    mapNot(pkg.Aliases, y.Aliases),
+		Interfaces: mapNot(pkg.Interfaces, y.Interfaces),
+	}
 }
 
 func (pkg *pkgData) empty() bool {
@@ -777,10 +798,11 @@ func (pkg *pkgData) parseType(obj *types.TypeName) {
 		doPanic := false
 		switch elT := t.Elem().(type) {
 		case *types.Struct:
-			doPanic = elT.NumFields() != 0
-			if !doPanic {
+			if elT.NumFields() == 0 {
 				// *struct{}
 				pkg.Types[name] = typeData{Underlying: "byte*"}
+			} else {
+				doPanic = true
 			}
 		case *types.Basic:
 			pkg.Types[name] = typeData{Underlying: elT.Name() + "*"}
@@ -863,12 +885,13 @@ func (pkg *pkgData) getTypeName(iface types.Type, name string) string {
 	switch dt := iface.(type) {
 	case *types.Named:
 		obj := dt.Obj()
-		if pkg := obj.Pkg(); pkg == nil {
+		pkg := obj.Pkg()
+		if pkg == nil {
 			// universe scope
 			return obj.Name()
 		}
 		// full package path
-		return fmt.Sprintf("%s.%s", obj.Pkg().Path(), obj.Name())
+		return fmt.Sprintf("%s.%s", pkg.Path(), obj.Name())
 	case *types.Basic:
 		return dt.String()
 	case *types.Pointer:
@@ -936,11 +959,6 @@ func archSplit(pkgArchs map[string]*pkgData) {
 		return
 	}
 
-	// does not have at least one element on every arch, skip
-	if len(pkgArchs) != len(buildConstraints) {
-		return
-	}
-
 	postMerge(func(arch string) bool { return true }, pkgArchs, "all")
 	for archStr := range knownArch {
 		postMerge(func(arch string) bool { return strings.Split(arch, "-")[1] == archStr }, pkgArchs, archStr)
@@ -976,22 +994,25 @@ func archSplit(pkgArchs map[string]*pkgData) {
 // group up results by archFilter, get items in every arch in the group, and extract to separate "arch"
 func postMerge(archFilter func(string) bool, pkgArchs map[string]*pkgData, name string) {
 	var filtered *pkgData
-	firstPkg := true
 
 	for arch, pkgD := range pkgArchs {
 		if !(architectureSet.Contains(arch) && archFilter(arch)) {
 			continue
 		}
 
-		if firstPkg {
+		if filtered == nil {
 			filtered = pkgD
-			firstPkg = false
 		} else {
 			filtered = filtered.and(pkgD)
 		}
+
+		if filtered.empty() {
+			// found nothing
+			return
+		}
 	}
 
-	if firstPkg || filtered.empty() {
+	if filtered == nil {
 		// found nothing
 		return
 	}
@@ -999,13 +1020,12 @@ func postMerge(archFilter func(string) bool, pkgArchs map[string]*pkgData, name 
 	// remove false positives
 	for arch, pkgD := range pkgArchs {
 		if architectureSet.Contains(arch) && !archFilter(arch) {
-			filtered.andNot(pkgD)
+			filtered = filtered.andNot(pkgD)
+			if filtered.empty() {
+				// only false positives
+				return
+			}
 		}
-	}
-
-	if filtered.empty() {
-		// only false positives
-		return
 	}
 
 	// remove duplicates
@@ -1013,9 +1033,10 @@ func postMerge(archFilter func(string) bool, pkgArchs map[string]*pkgData, name 
 		if !(architectureSet.Contains(arch) && archFilter(arch)) {
 			continue
 		}
-		pkgD.not(filtered)
-		if pkgD.empty() {
+		if pkgD = pkgD.not(filtered); pkgD.empty() {
 			delete(pkgArchs, arch)
+		} else {
+			pkgArchs[arch] = pkgD
 		}
 	}
 
@@ -1027,15 +1048,10 @@ func pkgParse(inCh <-chan string, outCh chan<- map[string]*packages.Package, wg 
 	for path := range inCh {
 		astPkgs := check1(parser.ParseDir(fset, path, nil, parser.PackageClauseOnly|parser.ParseComments))
 
-		var deletedKeys []string
 		for key, astPkg := range astPkgs {
 			if strings.HasSuffix(astPkg.Name, "_test") || astPkg.Name == "builtin" {
-				deletedKeys = append(deletedKeys, key)
+				delete(astPkgs, key)
 			}
-		}
-
-		for _, key := range deletedKeys {
-			delete(astPkgs, key)
 		}
 
 		for _, astPkg := range astPkgs {
@@ -1079,10 +1095,11 @@ func pkgMerge(inCh <-chan map[string]*pkgData, outPath string) {
 
 	for pkgArchs := range inCh {
 		for arch, pkg := range pkgArchs {
-			if _, ok := allPkgs[arch]; !ok {
-				allPkgs[arch] = newPkgData()
+			if archPkg, ok := allPkgs[arch]; ok {
+				allPkgs[arch] = archPkg.merge(pkg)
+			} else {
+				allPkgs[arch] = pkg
 			}
-			allPkgs[arch].merge(pkg)
 		}
 	}
 

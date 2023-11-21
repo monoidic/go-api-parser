@@ -5,3 +5,4 @@ out.json
 tests/main
 __pycache__
 results/*.json
+deduped
