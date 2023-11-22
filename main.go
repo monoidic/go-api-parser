@@ -372,12 +372,6 @@ func getFilenameBuildTags(filePath string) (goos, goarch string) {
 	fileName = fileName[:len(fileName)-3]             // remove .go
 	potentialTags := strings.Split(fileName, "_")[1:] // drop anything before first _
 
-	/*
-		if len(potentialTags) > 0 && potentialTags[len(potentialTags)-1] == "test" {
-			potentialTags = potentialTags[:len(potentialTags)-1]
-		}
-	*/
-
 	if len(potentialTags) == 0 {
 		return
 	}
@@ -387,10 +381,9 @@ func getFilenameBuildTags(filePath string) (goos, goarch string) {
 		potentialTags = potentialTags[tagsNum-2:]
 	}
 
-	//*_GOOS
-	//*_GOARCH
-	//*_GOOS_GOARCH
-	//*/
+	// *_GOOS
+	// *_GOARCH
+	// *_GOOS_GOARCH
 
 	last := potentialTags[len(potentialTags)-1]
 	if knownOS[last] {
@@ -486,7 +479,7 @@ func tagCheck(tag string, tags map[string]bool) bool {
 func getEnv(arch string) []string {
 	out := os.Environ()
 	if arch == "all" {
-		return out
+		return append(out, "GOARCH=amd64", "GOOS=linux", "CGO_ENABLED=0")
 	}
 
 	hasCGO := false
@@ -537,6 +530,10 @@ func filterPkg(pkg *ast.Package, path string) map[string]*packages.Package {
 			continue
 		}
 
+		if archMatches["all"] && len(archMatches) != 1 {
+			break
+		}
+
 		expr := getTags(filePath, fileObj)
 		// no build constraints
 		if expr == nil {
@@ -549,12 +546,6 @@ func filterPkg(pkg *ast.Package, path string) map[string]*packages.Package {
 			if expr.Eval(func(tag string) bool { return tagCheck(tag, tags) }) {
 				archMatches[arch] = true
 			}
-		}
-
-		// non-"all" files exist + every arch is matched by at least one file,
-		// nothing more to be learned here
-		if len(archMatches) == len(buildConstraints)+1 {
-			break
 		}
 	}
 
@@ -1019,12 +1010,13 @@ func postMerge(archFilter func(string) bool, pkgArchs map[string]*pkgData, name 
 
 	// remove false positives
 	for arch, pkgD := range pkgArchs {
-		if architectureSet.Contains(arch) && !archFilter(arch) {
-			filtered = filtered.andNot(pkgD)
-			if filtered.empty() {
-				// only false positives
-				return
-			}
+		if !(architectureSet.Contains(arch) && !archFilter(arch)) {
+			continue
+		}
+		filtered = filtered.andNot(pkgD)
+		if filtered.empty() {
+			// only false positives
+			return
 		}
 	}
 
@@ -1068,6 +1060,10 @@ func pkgExtract(inCh <-chan map[string]*packages.Package, outCh chan<- map[strin
 		for pkgArch, pkg := range pkgMap {
 			pkgD := newPkgData()
 			for _, pkgDef := range typeutil.Dependencies(pkg.Types) {
+				key := fmt.Sprintf("%s-%s", pkgDef.Path(), pkgArch)
+				if pkgSeen(key) {
+					continue
+				}
 				scope := pkgDef.Scope()
 				names := scope.Names()
 				for _, name := range names {
@@ -1088,6 +1084,13 @@ func pkgExtract(inCh <-chan map[string]*packages.Package, outCh chan<- map[strin
 	}
 
 	wg.Done()
+}
+
+var pkgSeenMap sync.Map
+
+func pkgSeen(key string) bool {
+	_, alreadyPresent := pkgSeenMap.Swap(key, true)
+	return alreadyPresent
 }
 
 func pkgMerge(inCh <-chan map[string]*pkgData, outPath string) {
