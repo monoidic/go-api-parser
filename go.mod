@@ -1,6 +1,6 @@
 module github.com/monoidic/go-api-parser
 
-go 1.21.4
+go 1.21
 
 require (
 	golang.org/x/mod v0.14.0
