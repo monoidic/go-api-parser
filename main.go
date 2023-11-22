@@ -9,6 +9,7 @@ import (
 	"go/token"
 	"go/types"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -517,49 +518,51 @@ func parseDiscardFuncBody(fset *token.FileSet, filename string, src []byte) (*as
 }
 
 func filterPkg(pkg *ast.Package, path string) map[string]*packages.Package {
-	archMatches := map[string]bool{}
-
 	conf := packages.Config{
 		Mode:      packages.NeedTypes | packages.NeedDeps | packages.NeedImports,
 		Dir:       os.Args[1],
 		ParseFile: parseDiscardFuncBody,
 	}
 
-	for filePath, fileObj := range pkg.Files {
-		if strings.HasSuffix(filePath, "_test.go") {
-			continue
+	/*
+		archMatches := map[string]bool{}
+
+		for filePath, fileObj := range pkg.Files {
+			if strings.HasSuffix(filePath, "_test.go") {
+				continue
+			}
+
+			if archMatches["all"] && len(archMatches) != 1 {
+				break
+			}
+
+			expr := getTags(filePath, fileObj)
+			// no build constraints
+			if expr == nil {
+				archMatches["all"] = true
+				continue
+			}
+
+			// identify which tag sets set in buildConstraints match
+			for arch, tags := range buildConstraints {
+				if expr.Eval(func(tag string) bool { return tagCheck(tag, tags) }) {
+					archMatches[arch] = true
+				}
+			}
 		}
 
+		// has something for all arches and some arch-specific things
 		if archMatches["all"] && len(archMatches) != 1 {
-			break
-		}
-
-		expr := getTags(filePath, fileObj)
-		// no build constraints
-		if expr == nil {
-			archMatches["all"] = true
-			continue
-		}
-
-		// identify which tag sets set in buildConstraints match
-		for arch, tags := range buildConstraints {
-			if expr.Eval(func(tag string) bool { return tagCheck(tag, tags) }) {
+			delete(archMatches, "all")
+			for arch := range buildConstraints {
 				archMatches[arch] = true
 			}
 		}
-	}
-
-	// has something for all arches and some arch-specific things
-	if archMatches["all"] && len(archMatches) != 1 {
-		delete(archMatches, "all")
-		for arch := range buildConstraints {
-			archMatches[arch] = true
-		}
-	}
+	*/
 
 	out := make(map[string]*packages.Package)
 
-	for arch := range archMatches {
+	for arch := range buildConstraints {
 		conf.Env = getEnv(arch)
 
 		newPkg := check1(packages.Load(&conf, path))
@@ -693,14 +696,8 @@ func (pkg *pkgData) andNot(y *pkgData) *pkgData {
 }
 
 func mapMerge[T any](x, y map[string]T) map[string]T {
-	out := make(map[string]T)
-
-	for _, m := range []map[string]T{x, y} {
-		for k, v := range m {
-			out[k] = v
-		}
-	}
-
+	out := maps.Clone(x)
+	maps.Copy(out, y)
 	return out
 }
 
@@ -952,33 +949,33 @@ func archSplit(pkgArchs map[string]*pkgData) {
 
 	postMerge(func(arch string) bool { return true }, pkgArchs, "all")
 	for archStr := range knownArch {
-		postMerge(func(arch string) bool { return strings.Split(arch, "-")[1] == archStr }, pkgArchs, archStr)
+		postMerge(func(arch string) bool { return buildConstraints[arch][archStr] }, pkgArchs, archStr)
 	}
 	for osStr := range knownOS {
-		postMerge(func(arch string) bool { return strings.Split(arch, "-")[0] == osStr }, pkgArchs, osStr)
+		postMerge(func(arch string) bool { return buildConstraints[arch][osStr] }, pkgArchs, osStr)
 	}
-	postMerge(func(arch string) bool { return unixOS[strings.Split(arch, "-")[0]] }, pkgArchs, "unix")
-	postMerge(func(arch string) bool { return arch[len(arch)-4:] == "-cgo" }, pkgArchs, "cgo")
+	postMerge(func(arch string) bool {
+		for tag := range buildConstraints[arch] {
+			if unixOS[tag] {
+				return true
+			}
+		}
+		return false
+	}, pkgArchs, "unix")
+	postMerge(func(arch string) bool { return buildConstraints[arch]["cgo"] }, pkgArchs, "cgo")
 
 	for osStr := range knownOS {
 		postMerge(func(arch string) bool {
-			split := strings.Split(arch, "-")
-			return split[0] == osStr && split[len(split)-1] == "cgo"
+			tags := buildConstraints[arch]
+			return tags[osStr] && tags["cgo"]
 		}, pkgArchs, osStr+"-cgo")
 	}
 
 	for archStr := range knownArch {
 		postMerge(func(arch string) bool {
-			split := strings.Split(arch, "-")
-			return split[1] == archStr && split[len(split)-1] == "cgo"
+			tags := buildConstraints[arch]
+			return tags[archStr] && tags["cgo"]
 		}, pkgArchs, archStr+"-cgo")
-	}
-
-	// additional cleanup of empty architectures
-	for arch, pkgD := range pkgArchs {
-		if pkgD.empty() {
-			delete(pkgArchs, arch)
-		}
 	}
 }
 
@@ -1089,7 +1086,7 @@ func pkgExtract(inCh <-chan map[string]*packages.Package, outCh chan<- map[strin
 var pkgSeenMap sync.Map
 
 func pkgSeen(key string) bool {
-	_, alreadyPresent := pkgSeenMap.Swap(key, true)
+	_, alreadyPresent := pkgSeenMap.Swap(key, struct{}{})
 	return alreadyPresent
 }
 
