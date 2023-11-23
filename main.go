@@ -66,10 +66,12 @@ func getArchitectures() (out []string) {
 	out = []string{
 		"darwin-amd64",
 		"darwin-amd64-cgo",
-		"freebsd-386",
-		"freebsd-386-cgo",
-		"freebsd-amd64",
-		"freebsd-amd64-cgo",
+		/*
+			"freebsd-386",
+			"freebsd-386-cgo",
+			"freebsd-amd64",
+			"freebsd-amd64-cgo",
+		*/
 		"linux-386",
 		"linux-386-cgo",
 		"windows-386",
@@ -80,7 +82,7 @@ func getArchitectures() (out []string) {
 		"linux-amd64-cgo",
 		// should be fine above here
 		// TODO track these down somehow
-		"linux-ppc64",
+		/*"linux-ppc64",*/
 		// // added in 1.11, but this is not going to be useful here
 		//"js-wasm",
 	}
@@ -93,105 +95,116 @@ func getArchitectures() (out []string) {
 			// https://go.dev/doc/go1.1#platforms
 			version: "v1.1",
 			archs: []string{
-				"freebsd-arm", "netbsd-386", "netbsd-386-cgo", "netbsd-amd64",
+				/*"freebsd-arm", "netbsd-386", "netbsd-386-cgo", "netbsd-amd64",
 				"netbsd-amd64-cgo", "netbsd-arm", "netbsd-arm-cgo", "openbsd-386", "openbsd-386-cgo",
-				"openbsd-amd64", "openbsd-amd64-cgo", "linux-arm-cgo",
+				"openbsd-amd64", "openbsd-amd64-cgo", "linux-arm", "linux-arm-cgo",
+				*/
+				"linux-arm", "linux-arm-cgo",
 			}},
 		{
 			// ???
 			version: "v1.2",
-			archs:   []string{"dragonfly-amd64", "dragonfly-amd64-cgo"},
+			archs:   []string{ /*"dragonfly-amd64", "dragonfly-amd64-cgo"*/ },
 		},
 		{
 			// https://go.dev/doc/go1.3#os
 			version: "v1.3",
-			archs:   []string{"plan9-386", "solaris-amd64"},
+			archs:   []string{ /*"plan9-386", "solaris-amd64"*/ },
 		},
 		{
 			// https://go.dev/doc/go1.4#os
 			version: "v1.4",
-			archs: []string{
-				"android-arm", "android-arm-cgo", "plan9-amd64", "android-amd64",
-				"android-amd64-cgo", "android-arm64", "android-arm64-cgo",
+			archs:   []string{
+				/*
+					"android-arm", "android-arm-cgo", "plan9-amd64", "android-amd64",
+					"android-amd64-cgo", "android-arm64", "android-arm64-cgo",
+				*/
 			},
 		},
 		{
 			// https://go.dev/doc/go1.5#ports
 			version: "v1.5",
 			archs: []string{
-				"darwin-arm64", "darwin-arm64-cgo", "linux-arm64",
-				"linux-arm64-cgo", "linux-ppc64le", "linux-ppc64le-cgo", "solaris-amd64-cgo",
+				/*
+					"darwin-arm64", "darwin-arm64-cgo", "linux-arm64",
+					"linux-arm64-cgo", "linux-ppc64le", "linux-ppc64le-cgo", "solaris-amd64-cgo",
+				*/
+				"darwin-arm64", "darwin-arm64-cgo", "linux-arm64", "linux-arm64-cgo",
 			},
 		},
 		{
 			// https://go.dev/doc/go1.6#ports
 			version: "v1.6",
-			archs: []string{
-				"linux-mips64", "linux-mips64-cgo", "linux-mips64le", "linux-mips64le-cgo",
-				"android-386", "android-386-cgo",
+			archs:   []string{
+				/*
+					"linux-mips64", "linux-mips64-cgo", "linux-mips64le", "linux-mips64le-cgo",
+					"android-386", "android-386-cgo",
+				*/
 			},
 		},
 		{
 			// https://go.dev/doc/go1.7#ports
 			version: "v1.7",
-			archs:   []string{"linux-s390x", "linux-s390x-cgo", "plan9-arm"},
+			archs:   []string{ /*"linux-s390x", "linux-s390x-cgo", "plan9-arm"*/ },
 		},
 		{
 			// https://go.dev/doc/go1.8#ports
 			version: "v1.8",
-			archs:   []string{"linux-mips", "linux-mips-cgo", "linux-mipsle", "linux-mipsle-cgo"},
+			archs:   []string{ /*"linux-mips", "linux-mips-cgo", "linux-mipsle", "linux-mipsle-cgo"*/ },
 		},
 		{
 			// ???
 			version: "v1.11",
-			archs:   []string{"linux-riscv64"},
+			archs:   []string{ /*"linux-riscv64"*/ },
 		},
 		{
 			// https://go.dev/doc/go1.12#ports
 			version: "v1.12",
 			// go tool dist list -json | jq '.[] | select(.CgoSupported == false and .GOARCH == "ppc64")'
 			// does linux-ppc64 support CGO or not?
-			archs: []string{"linux-ppc64-cgo", "windows-arm", "aix-ppc64", "openbsd-arm-cgo"},
+			archs: []string{ /*"linux-ppc64-cgo",*/ "windows-arm" /*"aix-ppc64", "openbsd-arm-cgo"*/},
 		},
 		{
 			// https://go.dev/doc/go1.13#ports
 			version: "v1.13",
-			archs: []string{
-				"aix-ppc64-cgo", "illumos-amd64", "illumos-amd64-cgo", "freebsd-arm-cgo",
-				"netbsd-arm64", "netbsd-arm64-cgo", "openbsd-arm64", "openbsd-arm64-cgo",
+			archs:   []string{
+				/*
+					"aix-ppc64-cgo", "illumos-amd64", "illumos-amd64-cgo", "freebsd-arm-cgo",
+					"netbsd-arm64", "netbsd-arm64-cgo", "openbsd-arm64", "openbsd-arm64-cgo",
+				*/
 			},
 		},
 		{
 			// https://go.dev/doc/go1.14#ports
 			version: "v1.14",
-			archs:   []string{"freebsd-arm64", "freebsd-arm64-cgo"},
+			archs:   []string{ /*"freebsd-arm64", "freebsd-arm64-cgo"*/ },
 		},
 		{
 			// https://go.dev/doc/go1.15#ports
 			version: "v1.15",
-			archs:   []string{"openbsd-arm"},
+			archs:   []string{ /*"openbsd-arm"*/ },
 		},
 		{
 			// https://go.dev/doc/go1.16#ports
 			version: "v1.16",
-			archs: []string{
-				"ios-arm64", "ios-arm64-cgo", "ios-amd64", "ios-amd64-cgo", "openbsd-mips64", "linux-riscv64-cgo",
+			archs:   []string{
+				/*"ios-arm64", "ios-arm64-cgo", "ios-amd64", "ios-amd64-cgo", "openbsd-mips64", "linux-riscv64-cgo",*/
 			},
 		},
 		{
 			// https://go.dev/doc/go1.17#ports
 			version: "v1.17",
-			archs:   []string{"windows-arm64", "windows-arm64-cgo", "openbsd-mips64-cgo"},
+			archs:   []string{"windows-arm64", "windows-arm64-cgo" /*"openbsd-mips64-cgo"*/},
 		},
 		{
 			// https://go.dev/doc/go1.19#ports
 			version: "v1.19",
-			archs:   []string{"linux-loong64", "linux-loong64-cgo"},
+			archs:   []string{ /*"linux-loong64", "linux-loong64-cgo"*/ },
 		},
 		{
 			// https://go.dev/doc/go1.20#ports
 			version: "v1.20",
-			archs:   []string{"freebsd-riscv64", "freebsd-riscv64-cgo"},
+			archs:   []string{ /*"freebsd-riscv64", "freebsd-riscv64-cgo"*/ },
 		},
 		// wasip1-wasm added in 1.21, but not interesting here
 	}
@@ -409,63 +422,19 @@ func parseDiscardFuncBody(fset *token.FileSet, filename string, src []byte) (*as
 	return f, err
 }
 
-func filterPkg(pkg *ast.Package, path string) map[string]*packages.Package {
-	conf := packages.Config{
-		Mode:      packages.NeedTypes | packages.NeedDeps | packages.NeedImports,
-		Dir:       os.Args[1],
-		ParseFile: parseDiscardFuncBody,
-	}
+type buildInfo struct {
+	arch string
+	path string
+}
 
-	/*
-		archMatches := map[string]bool{}
+type pkgArch struct {
+	pkg  *types.Package
+	arch string
+}
 
-		for filePath, fileObj := range pkg.Files {
-			if strings.HasSuffix(filePath, "_test.go") {
-				continue
-			}
-
-			if archMatches["all"] && len(archMatches) != 1 {
-				break
-			}
-
-			expr := getTags(filePath, fileObj)
-			// no build constraints
-			if expr == nil {
-				archMatches["all"] = true
-				continue
-			}
-
-			// identify which tag sets set in buildConstraints match
-			for arch, tags := range buildConstraints {
-				if expr.Eval(func(tag string) bool { return tagCheck(tag, tags) }) {
-					archMatches[arch] = true
-				}
-			}
-		}
-
-		// has something for all arches and some arch-specific things
-		if archMatches["all"] && len(archMatches) != 1 {
-			delete(archMatches, "all")
-			for arch := range buildConstraints {
-				archMatches[arch] = true
-			}
-		}
-	*/
-
-	out := make(map[string]*packages.Package)
-
-	for arch := range buildConstraints {
-		conf.Env = getEnv(arch)
-
-		newPkg := check1(packages.Load(&conf, path))
-		if len(newPkg) != 1 {
-			panic(len(newPkg))
-		}
-
-		out[arch] = newPkg[0]
-	}
-
-	return out
+type pkgDataArch struct {
+	pkgD *pkgData
+	arch string
 }
 
 type namedType struct {
@@ -967,7 +936,7 @@ func postMerge(archFilter func(string) bool, pkgArchs map[string]*pkgData, name 
 	pkgArchs[name] = filtered
 }
 
-func pkgParse(inCh <-chan string, outCh chan<- map[string]*packages.Package, wg *sync.WaitGroup) {
+func pkgFilter(inCh <-chan string, outCh chan<- buildInfo, wg *sync.WaitGroup) {
 	fset := token.NewFileSet()
 	for path := range inCh {
 		astPkgs := check1(parser.ParseDir(fset, path, nil, parser.PackageClauseOnly|parser.ParseComments))
@@ -978,40 +947,63 @@ func pkgParse(inCh <-chan string, outCh chan<- map[string]*packages.Package, wg 
 			}
 		}
 
-		for _, astPkg := range astPkgs {
-			outCh <- filterPkg(astPkg, path)
+		if len(astPkgs) > 0 {
+			for arch := range buildConstraints {
+				outCh <- buildInfo{arch: arch, path: path}
+			}
 		}
 	}
 
 	wg.Done()
 }
 
-func pkgExtract(inCh <-chan map[string]*packages.Package, outCh chan<- map[string]*pkgData, wg *sync.WaitGroup) {
-	for pkgMap := range inCh {
-		pkgArchs := make(map[string]*pkgData)
-		for pkgArch, pkg := range pkgMap {
-			pkgD := newPkgData()
-			for _, pkgDef := range typeutil.Dependencies(pkg.Types) {
-				key := fmt.Sprintf("%s-%s", pkgDef.Path(), pkgArch)
-				if pkgSeen(key) {
-					continue
-				}
-				scope := pkgDef.Scope()
-				names := scope.Names()
-				for _, name := range names {
-					switch obj := scope.Lookup(name).(type) {
-					case *types.Func:
-						pkgD.parseFunc(obj)
-					case *types.TypeName:
-						pkgD.parseType(obj)
-					}
-				}
-			}
+func pkgBuild(inCh <-chan buildInfo, outCh chan<- pkgArch, wg *sync.WaitGroup) {
+	conf := packages.Config{
+		Mode:      packages.NeedTypes | packages.NeedDeps | packages.NeedImports,
+		Dir:       os.Args[1],
+		ParseFile: parseDiscardFuncBody,
+	}
 
-			pkgArchs[pkgArch] = pkgD
+	for bi := range inCh {
+		conf.Env = getEnv(bi.arch)
+		newPkg := check1(packages.Load(&conf, bi.path))
+		if len(newPkg) != 1 {
+			panic(len(newPkg))
+		}
+		outCh <- pkgArch{pkg: newPkg[0].Types, arch: bi.arch}
+	}
+
+	wg.Done()
+}
+
+// also filters dupes
+func pkgDeps(inCh <-chan pkgArch, outCh chan<- pkgArch, wg *sync.WaitGroup) {
+	for pa := range inCh {
+		for _, dep := range typeutil.Dependencies(pa.pkg) {
+			key := fmt.Sprintf("%s-%s", dep.Path(), pa.arch)
+			if !pkgSeen(key) {
+				outCh <- pkgArch{pkg: dep, arch: pa.arch}
+			}
+		}
+	}
+
+	wg.Done()
+}
+
+func pkgExtract(inCh <-chan pkgArch, outCh chan<- pkgDataArch, wg *sync.WaitGroup) {
+	for pa := range inCh {
+		pkgD := newPkgData()
+		scope := pa.pkg.Scope()
+		for _, name := range scope.Names() {
+			switch obj := scope.Lookup(name).(type) {
+			case *types.Func:
+				pkgD.parseFunc(obj)
+			case *types.TypeName:
+				pkgD.parseType(obj)
+			}
 		}
 
-		outCh <- pkgArchs
+		outCh <- pkgDataArch{pkgD: pkgD, arch: pa.arch}
 	}
 
 	wg.Done()
@@ -1024,23 +1016,21 @@ func pkgSeen(key string) bool {
 	return alreadyPresent
 }
 
-func pkgMerge(inCh <-chan map[string]*pkgData, outPath string) {
+func pkgMerge(inCh <-chan pkgDataArch, outPath string) {
 	allPkgs := make(map[string]*pkgData)
 
-	for pkgArchs := range inCh {
-		for arch, pkg := range pkgArchs {
-			if _, ok := allPkgs[arch]; ok {
-				allPkgs[arch].mergeIn(pkg)
-			} else {
-				allPkgs[arch] = pkg
-			}
+	for pa := range inCh {
+		arch := pa.arch
+		pkg := pa.pkgD
+		if _, ok := allPkgs[arch]; ok {
+			allPkgs[arch].mergeIn(pkg)
+		} else {
+			allPkgs[arch] = pkg
 		}
 	}
 
 	archSplit(allPkgs)
-
 	data := check1(json.Marshal(allPkgs))
-
 	check(os.WriteFile(outPath, data, 0o666))
 }
 
@@ -1056,24 +1046,31 @@ func main() {
 	check(os.Chdir(os.Args[1]))
 
 	dirChan := make(chan string, BUFSIZE)
-	pkgChan := make(chan map[string]*packages.Package, BUFSIZE)
-	pkgDataChan := make(chan map[string]*pkgData, BUFSIZE)
+	filteredChan := make(chan buildInfo, BUFSIZE)
+	buildChan := make(chan pkgArch, BUFSIZE)
+	depsChan := make(chan pkgArch, BUFSIZE)
+	extractedChan := make(chan pkgDataArch, BUFSIZE)
 
 	numProcs := runtime.GOMAXPROCS(0)
 
-	var pkgParseWg, pkgExtractWg sync.WaitGroup
-	pkgParseWg.Add(numProcs)
-	pkgExtractWg.Add(numProcs)
+	var pkgParseWg, buildWg, depsWg, pkgExtractWg sync.WaitGroup
+	for _, wg := range []*sync.WaitGroup{&pkgParseWg, &buildWg, &depsWg, &pkgExtractWg} {
+		wg.Add(numProcs)
+	}
 
 	go dirwalk(dirChan)
 
 	for i := 0; i < numProcs; i++ {
-		go pkgParse(dirChan, pkgChan, &pkgParseWg)
-		go pkgExtract(pkgChan, pkgDataChan, &pkgExtractWg)
+		go pkgFilter(dirChan, filteredChan, &pkgParseWg)
+		go pkgBuild(filteredChan, buildChan, &buildWg)
+		go pkgDeps(buildChan, depsChan, &depsWg)
+		go pkgExtract(depsChan, extractedChan, &pkgExtractWg)
 	}
 
-	go closeChanWait(&pkgParseWg, pkgChan)
-	go closeChanWait(&pkgExtractWg, pkgDataChan)
+	go closeChanWait(&pkgParseWg, filteredChan)
+	go closeChanWait(&buildWg, buildChan)
+	go closeChanWait(&depsWg, depsChan)
+	go closeChanWait(&pkgExtractWg, extractedChan)
 
-	pkgMerge(pkgDataChan, outPath)
+	pkgMerge(extractedChan, outPath)
 }
