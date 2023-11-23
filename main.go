@@ -1076,7 +1076,6 @@ func pkgExtract(inCh <-chan map[string]*packages.Package, outCh chan<- map[strin
 			pkgArchs[pkgArch] = pkgD
 		}
 
-		archSplit(pkgArchs)
 		outCh <- pkgArchs
 	}
 
@@ -1102,6 +1101,8 @@ func pkgMerge(inCh <-chan map[string]*pkgData, outPath string) {
 			}
 		}
 	}
+
+	archSplit(allPkgs)
 
 	data := check1(json.Marshal(allPkgs))
 
