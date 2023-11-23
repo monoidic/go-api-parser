@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"go/ast"
-	"go/build/constraint"
 	"go/parser"
 	"go/token"
 	"go/types"
@@ -67,12 +66,10 @@ func getArchitectures() (out []string) {
 	out = []string{
 		"darwin-amd64",
 		"darwin-amd64-cgo",
-		/*
-			"freebsd-386",
-			"freebsd-386-cgo",
-			"freebsd-amd64",
-			"freebsd-amd64-cgo",
-		*/
+		"freebsd-386",
+		"freebsd-386-cgo",
+		"freebsd-amd64",
+		"freebsd-amd64-cgo",
 		"linux-386",
 		"linux-386-cgo",
 		"windows-386",
@@ -83,7 +80,7 @@ func getArchitectures() (out []string) {
 		"linux-amd64-cgo",
 		// should be fine above here
 		// TODO track these down somehow
-		/*"linux-ppc64",*/
+		"linux-ppc64",
 		// // added in 1.11, but this is not going to be useful here
 		//"js-wasm",
 	}
@@ -95,118 +92,106 @@ func getArchitectures() (out []string) {
 		{
 			// https://go.dev/doc/go1.1#platforms
 			version: "v1.1",
-			archs:   []string{
-				/*
-					"freebsd-arm", "netbsd-386", "netbsd-386-cgo", "netbsd-amd64",
-					"netbsd-amd64-cgo", "netbsd-arm", "netbsd-arm-cgo", "openbsd-386", "openbsd-386-cgo",
-					"openbsd-amd64", "openbsd-amd64-cgo", "linux-arm-cgo",
-				*/
+			archs: []string{
+				"freebsd-arm", "netbsd-386", "netbsd-386-cgo", "netbsd-amd64",
+				"netbsd-amd64-cgo", "netbsd-arm", "netbsd-arm-cgo", "openbsd-386", "openbsd-386-cgo",
+				"openbsd-amd64", "openbsd-amd64-cgo", "linux-arm-cgo",
 			}},
 		{
 			// ???
 			version: "v1.2",
-			archs:   []string{ /*"dragonfly-amd64", "dragonfly-amd64-cgo"*/ },
+			archs:   []string{"dragonfly-amd64", "dragonfly-amd64-cgo"},
 		},
 		{
 			// https://go.dev/doc/go1.3#os
 			version: "v1.3",
-			archs:   []string{ /*"plan9-386", "solaris-amd64"*/ },
+			archs:   []string{"plan9-386", "solaris-amd64"},
 		},
 		{
 			// https://go.dev/doc/go1.4#os
 			version: "v1.4",
-			archs:   []string{
-				/*
-					"android-arm", "android-arm-cgo", "plan9-amd64", "android-amd64",
-					"android-amd64-cgo", "android-arm64", "android-arm64-cgo",
-				*/
+			archs: []string{
+				"android-arm", "android-arm-cgo", "plan9-amd64", "android-amd64",
+				"android-amd64-cgo", "android-arm64", "android-arm64-cgo",
 			},
 		},
 		{
 			// https://go.dev/doc/go1.5#ports
 			version: "v1.5",
 			archs: []string{
-				/*
-					"darwin-arm64", "darwin-arm64-cgo", "linux-arm64",
-					"linux-arm64-cgo", "linux-ppc64le", "linux-ppc64le-cgo", "solaris-amd64-cgo",
-				*/
-				"darwin-arm64", "darwin-arm64-cgo",
-				"linux-arm64", "linux-arm64-cgo",
+				"darwin-arm64", "darwin-arm64-cgo", "linux-arm64",
+				"linux-arm64-cgo", "linux-ppc64le", "linux-ppc64le-cgo", "solaris-amd64-cgo",
 			},
 		},
 		{
 			// https://go.dev/doc/go1.6#ports
 			version: "v1.6",
-			archs:   []string{
-				/*
-					"linux-mips64", "linux-mips64-cgo", "linux-mips64le", "linux-mips64le-cgo",
-					"android-386", "android-386-cgo",
-				*/
+			archs: []string{
+				"linux-mips64", "linux-mips64-cgo", "linux-mips64le", "linux-mips64le-cgo",
+				"android-386", "android-386-cgo",
 			},
 		},
 		{
 			// https://go.dev/doc/go1.7#ports
 			version: "v1.7",
-			archs:   []string{ /*"linux-s390x", "linux-s390x-cgo", "plan9-arm"*/ },
+			archs:   []string{"linux-s390x", "linux-s390x-cgo", "plan9-arm"},
 		},
 		{
 			// https://go.dev/doc/go1.8#ports
 			version: "v1.8",
-			archs:   []string{ /*"linux-mips", "linux-mips-cgo", "linux-mipsle", "linux-mipsle-cgo"*/ },
+			archs:   []string{"linux-mips", "linux-mips-cgo", "linux-mipsle", "linux-mipsle-cgo"},
 		},
 		{
 			// ???
 			version: "v1.11",
-			archs:   []string{ /*"linux-riscv64"*/ },
+			archs:   []string{"linux-riscv64"},
 		},
 		{
 			// https://go.dev/doc/go1.12#ports
 			version: "v1.12",
 			// go tool dist list -json | jq '.[] | select(.CgoSupported == false and .GOARCH == "ppc64")'
 			// does linux-ppc64 support CGO or not?
-			archs: []string{ /*"linux-ppc64-cgo", "windows-arm", "aix-ppc64", "openbsd-arm-cgo"*/ },
+			archs: []string{"linux-ppc64-cgo", "windows-arm", "aix-ppc64", "openbsd-arm-cgo"},
 		},
 		{
 			// https://go.dev/doc/go1.13#ports
 			version: "v1.13",
-			archs:   []string{
-				/*
-					"aix-ppc64-cgo", "illumos-amd64", "illumos-amd64-cgo", "freebsd-arm-cgo",
-					"netbsd-arm64", "netbsd-arm64-cgo", "openbsd-arm64", "openbsd-arm64-cgo",
-				*/
+			archs: []string{
+				"aix-ppc64-cgo", "illumos-amd64", "illumos-amd64-cgo", "freebsd-arm-cgo",
+				"netbsd-arm64", "netbsd-arm64-cgo", "openbsd-arm64", "openbsd-arm64-cgo",
 			},
 		},
 		{
 			// https://go.dev/doc/go1.14#ports
 			version: "v1.14",
-			archs:   []string{ /*"freebsd-arm64", "freebsd-arm64-cgo"*/ },
+			archs:   []string{"freebsd-arm64", "freebsd-arm64-cgo"},
 		},
 		{
 			// https://go.dev/doc/go1.15#ports
 			version: "v1.15",
-			archs:   []string{ /*"openbsd-arm"*/ },
+			archs:   []string{"openbsd-arm"},
 		},
 		{
 			// https://go.dev/doc/go1.16#ports
 			version: "v1.16",
-			archs:   []string{
-				/*"ios-arm64", "ios-arm64-cgo", "ios-amd64", "ios-amd64-cgo", "openbsd-mips64", "linux-riscv64-cgo",*/
+			archs: []string{
+				"ios-arm64", "ios-arm64-cgo", "ios-amd64", "ios-amd64-cgo", "openbsd-mips64", "linux-riscv64-cgo",
 			},
 		},
 		{
 			// https://go.dev/doc/go1.17#ports
 			version: "v1.17",
-			archs:   []string{"windows-arm64", "windows-arm64-cgo" /*"openbsd-mips64-cgo"*/},
+			archs:   []string{"windows-arm64", "windows-arm64-cgo", "openbsd-mips64-cgo"},
 		},
 		{
 			// https://go.dev/doc/go1.19#ports
 			version: "v1.19",
-			archs:   []string{ /*"linux-loong64", "linux-loong64-cgo"*/ },
+			archs:   []string{"linux-loong64", "linux-loong64-cgo"},
 		},
 		{
 			// https://go.dev/doc/go1.20#ports
 			version: "v1.20",
-			archs:   []string{ /*"freebsd-riscv64", "freebsd-riscv64-cgo"*/ },
+			archs:   []string{"freebsd-riscv64", "freebsd-riscv64-cgo"},
 		},
 		// wasip1-wasm added in 1.21, but not interesting here
 	}
@@ -367,85 +352,6 @@ var knownArch = map[string]bool{
 	"wasm":        true,
 }
 
-// go/build/build.go goodOSArchFile
-func getFilenameBuildTags(filePath string) (goos, goarch string) {
-	fileName := filepath.Base(filePath)
-	fileName = fileName[:len(fileName)-3]             // remove .go
-	potentialTags := strings.Split(fileName, "_")[1:] // drop anything before first _
-
-	if len(potentialTags) == 0 {
-		return
-	}
-
-	// get last two _-seperated elements
-	if tagsNum := len(potentialTags); tagsNum > 2 {
-		potentialTags = potentialTags[tagsNum-2:]
-	}
-
-	// *_GOOS
-	// *_GOARCH
-	// *_GOOS_GOARCH
-
-	last := potentialTags[len(potentialTags)-1]
-	if knownOS[last] {
-		goos = last
-		return
-	}
-	if knownArch[last] {
-		goarch = last
-	}
-	if len(potentialTags) == 2 {
-		if first := potentialTags[0]; knownOS[first] {
-			goos = first
-		}
-	}
-
-	return
-}
-
-func commentTags(commentGroups []*ast.CommentGroup) constraint.Expr {
-	for _, commentGroup := range commentGroups {
-		for _, comment := range commentGroup.List {
-			if maybeExpr, err := constraint.Parse(comment.Text); err == nil {
-				return maybeExpr
-			}
-		}
-	}
-
-	return nil
-}
-
-var extraTagMap = map[string]string{
-	"android": "linux",
-	"illumos": "solaris",
-	"ios":     "darwin",
-}
-
-func getTags(filePath string, fileObj *ast.File) constraint.Expr {
-	expr := commentTags(fileObj.Comments)
-
-	goos, goarch := getFilenameBuildTags(filePath)
-
-	for _, tag := range []string{goos, goarch} {
-		if tag == "" {
-			continue
-		}
-
-		var tagExpr constraint.Expr = &constraint.TagExpr{Tag: tag}
-		if extraTag, ok := extraTagMap[tag]; ok {
-			tagExpr = &constraint.OrExpr{X: tagExpr, Y: &constraint.TagExpr{Tag: extraTag}}
-		}
-
-		if expr == nil {
-			expr = tagExpr
-		} else {
-			expr = &constraint.AndExpr{X: expr, Y: tagExpr}
-		}
-	}
-
-	return expr
-}
-
 // from src/cmd/dist/build.go
 var unixOS = map[string]bool{
 	"aix":       true,
@@ -460,20 +366,6 @@ var unixOS = map[string]bool{
 	"netbsd":    true,
 	"openbsd":   true,
 	"solaris":   true,
-}
-
-func tagCheck(tag string, tags map[string]bool) bool {
-	if tag != "unix" {
-		return tags[tag]
-	}
-
-	// tags map is shorter than unixOS map
-	for tag := range tags {
-		if unixOS[tag] {
-			return true
-		}
-	}
-	return false
 }
 
 // parse os-arch[-cgo]
@@ -646,7 +538,7 @@ type equalsI interface {
 	equals(equalsI) bool
 }
 
-func mapAnd[V equalsI](x, y map[string]V) map[string]V {
+func MapAnd[V equalsI](x, y map[string]V) map[string]V {
 	out := make(map[string]V)
 	if len(x) > len(y) {
 		// swap to iterate over shorter map
@@ -662,18 +554,35 @@ func mapAnd[V equalsI](x, y map[string]V) map[string]V {
 	return out
 }
 
-// get pkgData with definitions existing in both pkg and y
-func (pkg *pkgData) and(y *pkgData) *pkgData {
-	return &pkgData{
-		Funcs:      mapAnd(pkg.Funcs, y.Funcs),
-		Types:      mapAnd(pkg.Types, y.Types),
-		Structs:    mapAnd(pkg.Structs, y.Structs),
-		Aliases:    mapAnd(pkg.Aliases, y.Aliases),
-		Interfaces: mapAnd(pkg.Interfaces, y.Interfaces),
+func MapAndIn[V equalsI](x, y map[string]V) {
+	for name, xV := range x {
+		if yV, ok := y[name]; !(ok && xV.equals(yV)) {
+			delete(x, name)
+		}
 	}
 }
 
-func mapAndNot[V equalsI](x, y map[string]V) map[string]V {
+// get pkgData with definitions existing in both pkg And y
+func (pkg *pkgData) And(y *pkgData) *pkgData {
+	return &pkgData{
+		Funcs:      MapAnd(pkg.Funcs, y.Funcs),
+		Types:      MapAnd(pkg.Types, y.Types),
+		Structs:    MapAnd(pkg.Structs, y.Structs),
+		Aliases:    MapAnd(pkg.Aliases, y.Aliases),
+		Interfaces: MapAnd(pkg.Interfaces, y.Interfaces),
+	}
+}
+
+// in-place and
+func (pkg *pkgData) AndIn(y *pkgData) {
+	MapAndIn(pkg.Funcs, y.Funcs)
+	MapAndIn(pkg.Types, y.Types)
+	MapAndIn(pkg.Structs, y.Structs)
+	MapAndIn(pkg.Aliases, y.Aliases)
+	MapAndIn(pkg.Interfaces, y.Interfaces)
+}
+
+func MapAndNot[V equalsI](x, y map[string]V) map[string]V {
 	out := make(map[string]V)
 	for name, xV := range x {
 		if yV, ok := y[name]; !(ok && xV.equals(yV)) {
@@ -684,32 +593,58 @@ func mapAndNot[V equalsI](x, y map[string]V) map[string]V {
 	return out
 }
 
-// remove keys from pkg that have an entry with an equal value in y
-func (pkg *pkgData) andNot(y *pkgData) *pkgData {
-	return &pkgData{
-		Funcs:      mapAndNot(pkg.Funcs, y.Funcs),
-		Types:      mapAndNot(pkg.Types, y.Types),
-		Structs:    mapAndNot(pkg.Structs, y.Structs),
-		Aliases:    mapAndNot(pkg.Aliases, y.Aliases),
-		Interfaces: mapAndNot(pkg.Interfaces, y.Interfaces),
+func MapAndNotIn[V equalsI](x, y map[string]V) {
+	for name, xV := range x {
+		if yV, ok := y[name]; ok && xV.equals(yV) {
+			delete(x, name)
+		}
 	}
 }
 
-func mapMerge[T any](x, y map[string]T) map[string]T {
+// return map with key-value pairs from pkg that do not have an equal pair in y
+func (pkg *pkgData) AndNot(y *pkgData) *pkgData {
+	return &pkgData{
+		Funcs:      MapAndNot(pkg.Funcs, y.Funcs),
+		Types:      MapAndNot(pkg.Types, y.Types),
+		Structs:    MapAndNot(pkg.Structs, y.Structs),
+		Aliases:    MapAndNot(pkg.Aliases, y.Aliases),
+		Interfaces: MapAndNot(pkg.Interfaces, y.Interfaces),
+	}
+}
+
+// in-place version of andNot
+func (pkg *pkgData) AndNotIn(y *pkgData) {
+	MapAndNotIn(pkg.Funcs, y.Funcs)
+	MapAndNotIn(pkg.Types, y.Types)
+	MapAndNotIn(pkg.Structs, y.Structs)
+	MapAndNotIn(pkg.Aliases, y.Aliases)
+	MapAndNotIn(pkg.Interfaces, y.Interfaces)
+}
+
+func MapMerge[T any](x, y map[string]T) map[string]T {
 	out := maps.Clone(x)
 	maps.Copy(out, y)
 	return out
 }
 
-// merge y into pkg
-func (pkg *pkgData) merge(y *pkgData) *pkgData {
+// return merged map with both x and y
+func (pkg *pkgData) Merge(y *pkgData) *pkgData {
 	return &pkgData{
-		Funcs:      mapMerge(pkg.Funcs, y.Funcs),
-		Types:      mapMerge(pkg.Types, y.Types),
-		Structs:    mapMerge(pkg.Structs, y.Structs),
-		Aliases:    mapMerge(pkg.Aliases, y.Aliases),
-		Interfaces: mapMerge(pkg.Interfaces, y.Interfaces),
+		Funcs:      MapMerge(pkg.Funcs, y.Funcs),
+		Types:      MapMerge(pkg.Types, y.Types),
+		Structs:    MapMerge(pkg.Structs, y.Structs),
+		Aliases:    MapMerge(pkg.Aliases, y.Aliases),
+		Interfaces: MapMerge(pkg.Interfaces, y.Interfaces),
 	}
+}
+
+// in-place version of merge
+func (pkg *pkgData) mergeIn(y *pkgData) {
+	maps.Copy(pkg.Funcs, y.Funcs)
+	maps.Copy(pkg.Types, y.Types)
+	maps.Copy(pkg.Structs, y.Structs)
+	maps.Copy(pkg.Aliases, y.Aliases)
+	maps.Copy(pkg.Interfaces, y.Interfaces)
 }
 
 func mapNot[T any](x, y map[string]T) map[string]T {
@@ -991,7 +926,7 @@ func postMerge(archFilter func(string) bool, pkgArchs map[string]*pkgData, name 
 		if filtered == nil {
 			filtered = pkgD
 		} else {
-			filtered = filtered.and(pkgD)
+			filtered.AndIn(pkgD)
 		}
 
 		if filtered.empty() {
@@ -1010,7 +945,7 @@ func postMerge(archFilter func(string) bool, pkgArchs map[string]*pkgData, name 
 		if !(architectureSet.Contains(arch) && !archFilter(arch)) {
 			continue
 		}
-		filtered = filtered.andNot(pkgD)
+		filtered.AndNotIn(pkgD)
 		if filtered.empty() {
 			// only false positives
 			return
@@ -1094,8 +1029,8 @@ func pkgMerge(inCh <-chan map[string]*pkgData, outPath string) {
 
 	for pkgArchs := range inCh {
 		for arch, pkg := range pkgArchs {
-			if archPkg, ok := allPkgs[arch]; ok {
-				allPkgs[arch] = archPkg.merge(pkg)
+			if _, ok := allPkgs[arch]; ok {
+				allPkgs[arch].mergeIn(pkg)
 			} else {
 				allPkgs[arch] = pkg
 			}
