@@ -162,7 +162,7 @@ func getArchitectures() (out []string) {
 			version: "v1.12",
 			// go tool dist list -json | jq '.[] | select(.CgoSupported == false and .GOARCH == "ppc64")'
 			// does linux-ppc64 support CGO or not?
-			archs: []string{ /*"linux-ppc64-cgo",*/ "windows-arm" /*"aix-ppc64", "openbsd-arm-cgo"*/},
+			archs: []string{ /*"linux-ppc64-cgo", "windows-arm", "aix-ppc64", "openbsd-arm-cgo"*/ },
 		},
 		{
 			// https://go.dev/doc/go1.13#ports
@@ -194,7 +194,7 @@ func getArchitectures() (out []string) {
 		{
 			// https://go.dev/doc/go1.17#ports
 			version: "v1.17",
-			archs:   []string{"windows-arm64", "windows-arm64-cgo" /*"openbsd-mips64-cgo"*/},
+			archs:   []string{ /*"windows-arm64", "windows-arm64-cgo", "openbsd-mips64-cgo"*/ },
 		},
 		{
 			// https://go.dev/doc/go1.19#ports
@@ -252,13 +252,16 @@ func (s *stack[T]) pop() (T, bool) {
 }
 
 func getBuildConstraints() map[string]map[string]bool {
-	out := make(map[string]map[string]bool)
+	out := make(map[string]map[string]bool, len(architectures))
 
 	for _, architecture := range architectures {
 		split := strings.Split(architecture, "-")
-		archMap := make(map[string]bool, len(split))
+		archMap := make(map[string]bool)
 		for _, tag := range split {
 			archMap[tag] = true
+			if unixOS[tag] {
+				archMap["unix"] = true
+			}
 		}
 		out[architecture] = archMap
 	}
@@ -316,54 +319,58 @@ func dirwalk(ch chan<- string) {
 	close(ch)
 }
 
-// copy-pasted from github.com/golang/go src/go/build/syslist.go
-var knownOS = map[string]bool{
-	"aix":       true,
-	"android":   true,
-	"darwin":    true,
-	"dragonfly": true,
-	"freebsd":   true,
-	"hurd":      true,
-	"illumos":   true,
-	"ios":       true,
-	"js":        true,
-	"linux":     true,
-	"nacl":      true,
-	"netbsd":    true,
-	"openbsd":   true,
-	"plan9":     true,
-	"solaris":   true,
-	"wasip1":    true,
-	"windows":   true,
-	"zos":       true,
+// from github.com/golang/go src/go/build/syslist.go
+var knownOS = []string{
+	"aix",
+	"android",
+	"darwin",
+	"dragonfly",
+	"freebsd",
+	"hurd",
+	"illumos",
+	"ios",
+	"js",
+	"linux",
+	"nacl",
+	"netbsd",
+	"openbsd",
+	"plan9",
+	"solaris",
+	"wasip1",
+	"windows",
+	"zos",
 }
 
-var knownArch = map[string]bool{
-	"386":         true,
-	"amd64":       true,
-	"amd64p32":    true,
-	"arm":         true,
-	"armbe":       true,
-	"arm64":       true,
-	"arm64be":     true,
-	"loong64":     true,
-	"mips":        true,
-	"mipsle":      true,
-	"mips64":      true,
-	"mips64le":    true,
-	"mips64p32":   true,
-	"mips64p32le": true,
-	"ppc":         true,
-	"ppc64":       true,
-	"ppc64le":     true,
-	"riscv":       true,
-	"riscv64":     true,
-	"s390":        true,
-	"s390x":       true,
-	"sparc":       true,
-	"sparc64":     true,
-	"wasm":        true,
+var knownOSSet = makeSet(knownOS)
+
+var knownArch = []string{
+	"386",
+	"amd64",
+	"amd64p32",
+	"arm",
+	"armbe",
+	"arm64",
+	"arm64be",
+	"loong64",
+	"mips",
+	"mipsle",
+	"mips64",
+	"mips64le",
+	"mips64p32",
+	"mips64p32le",
+	"ppc",
+	"ppc64",
+	"ppc64le",
+	"riscv",
+	"riscv64",
+	"s390",
+	"s390x",
+	"sparc",
+	"sparc64",
+	"wasm",
 }
+
+var knownArchSet = makeSet(knownArch)
 
 // from src/cmd/dist/build.go
 var unixOS = map[string]bool{
@@ -390,9 +397,9 @@ func getEnv(arch string) []string {
 
 	hasCGO := false
 	for _, s := range strings.Split(arch, "-") {
-		if knownArch[s] {
+		if knownArchSet.Contains(s) {
 			out = append(out, fmt.Sprintf("GOARCH=%s", s))
-		} else if knownOS[s] {
+		} else if knownOSSet.Contains(s) {
 			out = append(out, fmt.Sprintf("GOOS=%s", s))
 		} else if s == "cgo" {
 			hasCGO = true
@@ -503,6 +510,16 @@ func newPkgData() *pkgData {
 	}
 }
 
+func (pkgD *pkgData) Clone() *pkgData {
+	return &pkgData{
+		Funcs:      maps.Clone(pkgD.Funcs),
+		Types:      maps.Clone(pkgD.Types),
+		Structs:    maps.Clone(pkgD.Structs),
+		Aliases:    maps.Clone(pkgD.Aliases),
+		Interfaces: maps.Clone(pkgD.Interfaces),
+	}
+}
+
 type equalsI interface {
 	equals(equalsI) bool
 }
@@ -608,7 +625,7 @@ func (pkg *pkgData) Merge(y *pkgData) *pkgData {
 }
 
 // in-place version of merge
-func (pkg *pkgData) mergeIn(y *pkgData) {
+func (pkg *pkgData) MergeIn(y *pkgData) {
 	maps.Copy(pkg.Funcs, y.Funcs)
 	maps.Copy(pkg.Types, y.Types)
 	maps.Copy(pkg.Structs, y.Structs)
@@ -627,8 +644,14 @@ func mapNot[T any](x, y map[string]T) map[string]T {
 	return out
 }
 
+func mapNotIn[T any](x, y map[string]T) {
+	for k := range y {
+		delete(x, k)
+	}
+}
+
 // remove keys existing in y from pkg
-func (pkg *pkgData) not(y *pkgData) *pkgData {
+func (pkg *pkgData) Not(y *pkgData) *pkgData {
 	return &pkgData{
 		Funcs:      mapNot(pkg.Funcs, y.Funcs),
 		Types:      mapNot(pkg.Types, y.Types),
@@ -636,6 +659,14 @@ func (pkg *pkgData) not(y *pkgData) *pkgData {
 		Aliases:    mapNot(pkg.Aliases, y.Aliases),
 		Interfaces: mapNot(pkg.Interfaces, y.Interfaces),
 	}
+}
+
+func (pkg *pkgData) NotIn(y *pkgData) {
+	mapNotIn(pkg.Funcs, y.Funcs)
+	mapNotIn(pkg.Types, y.Types)
+	mapNotIn(pkg.Structs, y.Structs)
+	mapNotIn(pkg.Aliases, y.Aliases)
+	mapNotIn(pkg.Interfaces, y.Interfaces)
 }
 
 func (pkg *pkgData) empty() bool {
@@ -652,9 +683,12 @@ func (pkg *pkgData) parseFunc(obj *types.Func) {
 
 	name := obj.FullName()
 
+	params := pkg.tupToSlice(signature.Params(), name+"|param")
+	results := pkg.tupToSlice(signature.Results(), name+"|result")
+
 	pkg.Funcs[name] = funcData{
-		Params:  pkg.tupToSlice(signature.Params(), name+"|param"),
-		Results: pkg.tupToSlice(signature.Results(), name+"|result"),
+		Params:  params,
+		Results: results,
 	}
 }
 
@@ -752,9 +786,11 @@ func (pkg *pkgData) parseMethod(method types.Object) {
 	}
 	realParams = append(realParams, baseParams...)
 
+	results := pkg.tupToSlice(signature.Results(), name+"|result")
+
 	pkg.Funcs[name] = funcData{
 		Params:  realParams,
-		Results: pkg.tupToSlice(signature.Results(), name+"|result"),
+		Results: results,
 	}
 }
 
@@ -817,7 +853,7 @@ func (pkg *pkgData) getTypeName(iface types.Type, name string) string {
 
 func (pkg *pkgData) parseMethods(obj *types.TypeName) {
 	objT := obj.Type()
-	for _, method := range typeutil.IntuitiveMethodSet(obj.Type(), nil) {
+	for _, method := range typeutil.IntuitiveMethodSet(objT, nil) {
 		methodO := method.Obj()
 		if selfMethod(objT, methodO) {
 			pkg.parseMethod(methodO)
@@ -852,34 +888,20 @@ func archSplit(pkgArchs map[string]*pkgData) {
 	}
 
 	postMerge(func(arch string) bool { return true }, pkgArchs, "all")
-	for archStr := range knownArch {
-		postMerge(func(arch string) bool { return buildConstraints[arch][archStr] }, pkgArchs, archStr)
-	}
-	for osStr := range knownOS {
-		postMerge(func(arch string) bool { return buildConstraints[arch][osStr] }, pkgArchs, osStr)
-	}
-	postMerge(func(arch string) bool {
-		for tag := range buildConstraints[arch] {
-			if unixOS[tag] {
-				return true
-			}
+
+	for _, sl := range [][]string{{"unix"}, knownOS, knownArch, {"cgo"}} {
+		for _, tagStr := range sl {
+			postMerge(func(arch string) bool { return buildConstraints[arch][tagStr] }, pkgArchs, tagStr)
 		}
-		return false
-	}, pkgArchs, "unix")
-	postMerge(func(arch string) bool { return buildConstraints[arch]["cgo"] }, pkgArchs, "cgo")
-
-	for osStr := range knownOS {
-		postMerge(func(arch string) bool {
-			tags := buildConstraints[arch]
-			return tags[osStr] && tags["cgo"]
-		}, pkgArchs, osStr+"-cgo")
 	}
 
-	for archStr := range knownArch {
-		postMerge(func(arch string) bool {
-			tags := buildConstraints[arch]
-			return tags[archStr] && tags["cgo"]
-		}, pkgArchs, archStr+"-cgo")
+	for _, sl := range [][]string{knownOS, knownArch} {
+		for _, tagStr := range sl {
+			postMerge(func(arch string) bool {
+				tags := buildConstraints[arch]
+				return tags[tagStr] && tags["cgo"]
+			}, pkgArchs, tagStr+"-cgo")
+		}
 	}
 }
 
@@ -893,7 +915,7 @@ func postMerge(archFilter func(string) bool, pkgArchs map[string]*pkgData, name 
 		}
 
 		if filtered == nil {
-			filtered = pkgD
+			filtered = pkgD.Clone()
 		} else {
 			filtered.AndIn(pkgD)
 		}
@@ -926,10 +948,9 @@ func postMerge(archFilter func(string) bool, pkgArchs map[string]*pkgData, name 
 		if !(architectureSet.Contains(arch) && archFilter(arch)) {
 			continue
 		}
-		if pkgD = pkgD.not(filtered); pkgD.empty() {
+		pkgD.NotIn(filtered)
+		if pkgD.empty() {
 			delete(pkgArchs, arch)
-		} else {
-			pkgArchs[arch] = pkgD
 		}
 	}
 
@@ -947,10 +968,12 @@ func pkgFilter(inCh <-chan string, outCh chan<- buildInfo, wg *sync.WaitGroup) {
 			}
 		}
 
-		if len(astPkgs) > 0 {
-			for arch := range buildConstraints {
-				outCh <- buildInfo{arch: arch, path: path}
-			}
+		if len(astPkgs) == 0 {
+			continue
+		}
+
+		for _, arch := range architectures {
+			outCh <- buildInfo{arch: arch, path: path}
 		}
 	}
 
@@ -1017,19 +1040,23 @@ func pkgSeen(key string) bool {
 }
 
 func pkgMerge(inCh <-chan pkgDataArch, outPath string) {
-	allPkgs := make(map[string]*pkgData)
+	allPkgs := make(map[string]*pkgData, len(buildConstraints))
+	for _, arch := range architectures {
+		allPkgs[arch] = newPkgData()
+	}
 
 	for pa := range inCh {
-		arch := pa.arch
-		pkg := pa.pkgD
-		if _, ok := allPkgs[arch]; ok {
-			allPkgs[arch].mergeIn(pkg)
-		} else {
-			allPkgs[arch] = pkg
-		}
+		allPkgs[pa.arch].MergeIn(pa.pkgD)
 	}
 
 	archSplit(allPkgs)
+
+	for arch, pkgD := range allPkgs {
+		if pkgD.empty() {
+			delete(allPkgs, arch)
+		}
+	}
+
 	data := check1(json.Marshal(allPkgs))
 	check(os.WriteFile(outPath, data, 0o666))
 }
