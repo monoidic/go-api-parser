@@ -673,7 +673,6 @@ func (pkg *pkgData) empty() bool {
 	return (len(pkg.Funcs) + len(pkg.Types) + len(pkg.Structs) + len(pkg.Aliases) + len(pkg.Interfaces)) == 0
 }
 
-// also handle methods
 func (pkg *pkgData) parseFunc(obj *types.Func) {
 	signature := obj.Type().(*types.Signature)
 	// do not handle generic functions
@@ -686,6 +685,14 @@ func (pkg *pkgData) parseFunc(obj *types.Func) {
 	params := pkg.tupToSlice(signature.Params(), name+"|param")
 	results := pkg.tupToSlice(signature.Results(), name+"|result")
 
+	for _, sl := range [][]namedType{params, results} {
+		for _, nt := range sl {
+			if strings.Contains(nt.DataType, "invalid type") {
+				return
+			}
+		}
+	}
+
 	pkg.Funcs[name] = funcData{
 		Params:  params,
 		Results: results,
@@ -695,7 +702,10 @@ func (pkg *pkgData) parseFunc(obj *types.Func) {
 func (pkg *pkgData) parseType(obj *types.TypeName) {
 	name := fmt.Sprintf("%s.%s", obj.Pkg().Path(), obj.Name())
 	if obj.IsAlias() {
-		pkg.Aliases[name] = alias{Target: pkg.getTypeName(obj.Type(), name)}
+		target := pkg.getTypeName(obj.Type(), name)
+		if !strings.Contains(target, "invalid type") {
+			pkg.Aliases[name] = alias{Target: target}
+		}
 		return
 	}
 
@@ -711,7 +721,8 @@ func (pkg *pkgData) parseType(obj *types.TypeName) {
 		return
 	}
 
-	isInterface := false
+	var isInterface bool
+	var typeName, typeUnderlying string
 
 	switch t := named.Underlying().(type) {
 	case *types.Struct:
@@ -719,23 +730,26 @@ func (pkg *pkgData) parseType(obj *types.TypeName) {
 	case *types.Interface:
 		isInterface = true
 	case *types.Basic:
-		pkg.Types[pkg.getTypeName(obj.Type(), "")] = typeData{Underlying: pkg.getTypeName(t, "")}
+		typeName = pkg.getTypeName(obj.Type(), "")
+		typeUnderlying = pkg.getTypeName(t, "")
 	case *types.Pointer:
 		doPanic := false
 		switch elT := t.Elem().(type) {
 		case *types.Struct:
 			if elT.NumFields() == 0 {
 				// *struct{}
-				pkg.Types[name] = typeData{Underlying: "byte*"}
+				typeName = name
+				typeUnderlying = "byte*"
 			} else {
 				doPanic = true
 			}
 		case *types.Basic:
-			pkg.Types[name] = typeData{Underlying: elT.Name() + "*"}
+			typeName = name
+			typeUnderlying = elT.Name() + "*"
 		case *types.Named:
 			elTO := elT.Obj()
-			childName := fmt.Sprintf("%s.%s", elTO.Pkg().Path(), elTO.Name())
-			pkg.Types[name] = typeData{Underlying: childName + "*"}
+			typeName = name
+			typeUnderlying = fmt.Sprintf("%s.%s*", elTO.Pkg().Path(), elTO.Name())
 		default:
 			doPanic = true
 		}
@@ -743,9 +757,14 @@ func (pkg *pkgData) parseType(obj *types.TypeName) {
 			panic(fmt.Sprintf("pkg %s, type %s", named.Obj().Pkg().Path(), named))
 		}
 	case *types.Array, *types.Slice, *types.Map, *types.Chan, *types.Signature:
-		pkg.Types[name] = typeData{Underlying: pkg.getTypeName(t, name)}
+		typeName = name
+		typeUnderlying = pkg.getTypeName(t, name)
 	default:
 		_ = named.Underlying().(*types.Basic)
+	}
+
+	if typeName != "" && !strings.Contains(typeUnderlying, "invalid type") {
+		pkg.Types[typeName] = typeData{Underlying: typeUnderlying}
 	}
 
 	if isInterface {
@@ -787,6 +806,14 @@ func (pkg *pkgData) parseMethod(method types.Object) {
 	realParams = append(realParams, baseParams...)
 
 	results := pkg.tupToSlice(signature.Results(), name+"|result")
+
+	for _, sl := range [][]namedType{realParams, results} {
+		for _, nt := range sl {
+			if strings.Contains(nt.DataType, "invalid type") {
+				return
+			}
+		}
+	}
 
 	pkg.Funcs[name] = funcData{
 		Params:  realParams,
@@ -868,9 +895,13 @@ func (pkg *pkgData) parseStruct(name string, obj *types.Struct) {
 		field := obj.Field(i)
 		// for "anonymous" struct members, e.g database/sql.Tx.stmts
 		fieldPath := fmt.Sprintf("%s.%s", name, field.Name())
+		dataType := pkg.getTypeName(field.Type(), fieldPath)
+		if strings.Contains(dataType, "invalid type") {
+			return
+		}
 		fields[i] = namedType{
 			Name:     field.Name(),
-			DataType: pkg.getTypeName(field.Type(), fieldPath),
+			DataType: dataType,
 		}
 	}
 	pkg.Structs[name] = structDef{Fields: fields}
