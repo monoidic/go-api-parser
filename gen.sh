@@ -25,7 +25,7 @@ build_for_tag() {
 	echo $tag
 	git -C $go_dir checkout $tag &>/dev/null
 
-	time env version=$tag ./go-api-parser $root results/${tag}.json || exit $?
+	time ./go-api-parser -src=$root -out=results/${tag}.json -version=$tag || exit $?
 }
 
 main() {
