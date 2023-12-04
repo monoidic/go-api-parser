@@ -182,12 +182,12 @@ func pkgFilter(inCh <-chan string, outCh chan<- buildInfo, wg *sync.WaitGroup) {
 func pkgBuild(inCh <-chan buildInfo, outCh chan<- pkgArch, wg *sync.WaitGroup) {
 	conf := packages.Config{
 		Mode:      packages.NeedTypes | packages.NeedDeps | packages.NeedImports,
-		Dir:       sourceRoot,
 		ParseFile: parseDiscardFuncBody,
 	}
 
 	for bi := range inCh {
 		conf.Env = getEnv(bi.arch)
+		conf.Dir = bi.path
 		newPkg := check1(packages.Load(&conf, bi.path))
 		if len(newPkg) != 1 {
 			panic(len(newPkg))
