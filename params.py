@@ -195,12 +195,14 @@ def recursive_dir_chmod(path, mode):
 
 
 def run_api_parser(api_parser, dep_dir, version):
-    env = os.environ.copy()
-    env['version'] = version
     with tempfile.NamedTemporaryFile() as json_file:
         p = subprocess.Popen(
-            [api_parser, dep_dir, json_file.name],
-            env=env,
+            [
+                api_parser,
+                '-src', dep_dir,
+                '-out', json_file.name,
+                '-version', version,
+            ],
         )
         if p.wait() != 0:
             raise Exception('failed to get dep info')
