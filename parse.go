@@ -93,11 +93,15 @@ func getParseDiscard(arch string) parseFunc {
 		for _, pkg := range f.Imports {
 			if path := pkg.Path; path != nil && path.Value == "\"C\"" {
 				var buf bytes.Buffer
-				cmd := exec.Command("go", "tool", "cgo", "-godefs", filename)
+				dir := check1(os.MkdirTemp("", "go-api-parser"))
+				defer os.RemoveAll(dir)
+				cmd := exec.Command("go", "tool", "cgo", "-godefs", "-objdir", dir, filename)
 				cmd.Env = env
 				cmd.Stdout = &buf
-				if err = cmd.Run(); err != nil {
-					return nil, nil
+				cmd.Stderr = &buf
+				err = cmd.Run()
+				if err != nil {
+					panic(filename + " " + cc + buf.String())
 				}
 				src = buf.Bytes()
 				f, err = parser.ParseFile(fset, filename, src, 0)
