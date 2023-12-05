@@ -181,13 +181,13 @@ func pkgFilter(inCh <-chan string, outCh chan<- buildInfo, wg *sync.WaitGroup) {
 
 func pkgBuild(inCh <-chan buildInfo, outCh chan<- pkgArch, wg *sync.WaitGroup) {
 	conf := packages.Config{
-		Mode:      packages.NeedTypes | packages.NeedDeps | packages.NeedImports,
-		ParseFile: parseDiscardFuncBody,
+		Mode: packages.NeedTypes | packages.NeedDeps | packages.NeedImports,
 	}
 
 	for bi := range inCh {
 		conf.Env = getEnv(bi.arch)
 		conf.Dir = bi.path
+		conf.ParseFile = parseDiscards[bi.arch]
 		newPkg := check1(packages.Load(&conf, bi.path))
 		if len(newPkg) != 1 {
 			panic(len(newPkg))
@@ -272,12 +272,14 @@ var (
 	outPath       string
 	goVersion     string
 	permitInvalid bool
+	getCgo        bool
 )
 
 func lateInit() {
 	architectures = getArchitectures()
 	architectureSet = makeSet(architectures)
 	buildConstraints = getBuildConstraints()
+	parseDiscards = getParseDiscards()
 }
 
 func main() {
@@ -285,6 +287,7 @@ func main() {
 	flag.StringVar(&outPath, "out", "", "path to file to dump json results in")
 	flag.StringVar(&goVersion, "version", runtime.Version(), "go version to use, in go1.${minor}.${patch} format")
 	flag.BoolVar(&permitInvalid, "permit_invalid", false, "permit \"invalid type\" results")
+	flag.BoolVar(&getCgo, "get_cgo", false, "get per-arch cgo definitions")
 	flag.Parse()
 	if sourceRoot == "" || outPath == "" {
 		flag.PrintDefaults()

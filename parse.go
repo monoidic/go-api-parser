@@ -1,18 +1,129 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"go/types"
+	"os"
+	"os/exec"
 	"strings"
 
 	"golang.org/x/tools/go/types/typeutil"
 )
 
+type parseFunc func(fset *token.FileSet, filename string, src []byte) (*ast.File, error)
+
+var parseDiscards map[string]parseFunc
+
+func getParseDiscards() map[string]parseFunc {
+	ret := make(map[string]parseFunc, len(architectures))
+	for _, arch := range architectures {
+		if getCgo {
+			ret[arch] = getParseDiscard(arch)
+		} else {
+			ret[arch] = parseDiscardFuncBody
+		}
+	}
+
+	return ret
+}
+
+func getParseDiscard(arch string) parseFunc {
+	if !strings.Contains(arch, "cgo") {
+		return parseDiscardFuncBody
+	}
+	split := strings.Split(arch, "-")
+	if len(split) != 3 {
+		panic(arch)
+	}
+
+	goos := split[0]
+	goarch := split[1]
+
+	if goos == "darwin" {
+		// not handled
+		return parseDiscardFuncBody
+	}
+
+	var triplet, cc, cxx, ar string
+
+	switch fmt.Sprintf("%s-%s", goos, goarch) {
+	case "linux-386":
+		triplet = "i686-linux-gnu"
+	case "linux-amd64":
+		triplet = "x86_64-linux-gnu"
+	case "linux-arm":
+		triplet = "arm-linux-gnueabihf"
+	case "linux-arm64":
+		triplet = "aarch64-linux-gnu"
+	case "windows-386":
+		cc = "i686-w64-mingw32-gcc-win32"
+		cxx = "i686-w64-mingw32-g++-win32"
+		ar = "i686-w64-mingw32-ar"
+	case "windows-amd64":
+		cc = "x86_64-w64-mingw32-gcc-win32"
+		cxx = "x86_64-w64-mingw32-c++-win32"
+		ar = "x86_64-w64-mingw32-ar"
+	}
+
+	if triplet != "" {
+		cc = fmt.Sprintf("%s-gcc", triplet)
+		cxx = fmt.Sprintf("%s-g++", triplet)
+		ar = fmt.Sprintf("%s-ar", triplet)
+	}
+
+	env := append(
+		os.Environ(),
+		fmt.Sprintf("GOOS=%s", goos),
+		fmt.Sprintf("GOARCH=%s", goarch),
+		fmt.Sprintf("CC=%s", cc),
+		fmt.Sprintf("CXX=%s", cxx),
+		fmt.Sprintf("AR=%s", ar),
+	)
+
+	return func(fset *token.FileSet, filename string, src []byte) (*ast.File, error) {
+		f, err := parser.ParseFile(fset, filename, src, 0)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, pkg := range f.Imports {
+			if path := pkg.Path; path != nil && path.Value == "\"C\"" {
+				var buf bytes.Buffer
+				cmd := exec.Command("go", "tool", "cgo", "-godefs", filename)
+				cmd.Env = env
+				cmd.Stdout = &buf
+				if err = cmd.Run(); err != nil {
+					return nil, nil
+				}
+				src = buf.Bytes()
+				f, err = parser.ParseFile(fset, filename, src, 0)
+				if err != nil {
+					return nil, err
+				}
+				break
+			}
+		}
+
+		for _, decl := range f.Decls {
+			if funcDecl, ok := decl.(*ast.FuncDecl); ok {
+				funcDecl.Body = nil
+			}
+		}
+
+		return f, nil
+	}
+
+}
+
 func parseDiscardFuncBody(fset *token.FileSet, filename string, src []byte) (*ast.File, error) {
 	f, err := parser.ParseFile(fset, filename, src, 0)
+	if err != nil {
+		return nil, err
+	}
 
 	for _, decl := range f.Decls {
 		if funcDecl, ok := decl.(*ast.FuncDecl); ok {
@@ -20,7 +131,7 @@ func parseDiscardFuncBody(fset *token.FileSet, filename string, src []byte) (*as
 		}
 	}
 
-	return f, err
+	return f, nil
 }
 
 func (pkg *pkgData) parseFunc(obj *types.Func) {

@@ -44,6 +44,9 @@ jobs:
                 path: go
                 key: ${{ needs.fetch_golang.outputs.key }}
 
+              # for cgo definitions
+            - run: "bash -c '{gcc,g++,binutils}-{i686-linux-gnu,x86-64-linux-gnu,arm-linux-gnueabihf} {gcc,g++}-mingw-w64-{i686,x86-64}-win32 binutils-mingw-w64-{i686,x86-64}'"
+
             - run: env go_dir=$(realpath go) tag=${{ matrix.go_version }} ./gen.sh
 
             - uses: actions/upload-artifact@v3
