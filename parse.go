@@ -48,7 +48,7 @@ func getParseDiscard(arch string) parseFunc {
 		return parseDiscardFuncBody
 	}
 
-	var triplet, cc, cxx, ar string
+	var triplet, suffix string
 
 	switch fmt.Sprintf("%s-%s", goos, goarch) {
 	case "linux-386":
@@ -60,28 +60,20 @@ func getParseDiscard(arch string) parseFunc {
 	case "linux-arm64":
 		triplet = "aarch64-linux-gnu"
 	case "windows-386":
-		cc = "i686-w64-mingw32-gcc-win32"
-		cxx = "i686-w64-mingw32-g++-win32"
-		ar = "i686-w64-mingw32-ar"
+		triplet = "i686-w64-mingw32"
+		suffix = "-win32"
 	case "windows-amd64":
-		cc = "x86_64-w64-mingw32-gcc-win32"
-		cxx = "x86_64-w64-mingw32-c++-win32"
-		ar = "x86_64-w64-mingw32-ar"
-	}
-
-	if triplet != "" {
-		cc = fmt.Sprintf("%s-gcc", triplet)
-		cxx = fmt.Sprintf("%s-g++", triplet)
-		ar = fmt.Sprintf("%s-ar", triplet)
+		triplet = "x86_64-w64-mingw32"
+		suffix = "-win32"
 	}
 
 	env := append(
 		os.Environ(),
 		fmt.Sprintf("GOOS=%s", goos),
 		fmt.Sprintf("GOARCH=%s", goarch),
-		fmt.Sprintf("CC=%s", cc),
-		fmt.Sprintf("CXX=%s", cxx),
-		fmt.Sprintf("AR=%s", ar),
+		fmt.Sprintf("CC=%s-gcc%s", triplet, suffix),
+		fmt.Sprintf("CXX=%s-g++%s", triplet, suffix),
+		fmt.Sprintf("AR=%s-ar", triplet),
 	)
 
 	return func(fset *token.FileSet, filename string, src []byte) (*ast.File, error) {
@@ -101,7 +93,7 @@ func getParseDiscard(arch string) parseFunc {
 				cmd.Stderr = &errBuf
 				err = cmd.Run()
 				if err != nil {
-					panic(filename + " " + cc + " " + errBuf.String())
+					panic(fmt.Sprintf("%s %s %s", filename, triplet, errBuf.String()))
 				}
 				src = buf.Bytes()
 				f, err = parser.ParseFile(fset, filename, src, 0)
