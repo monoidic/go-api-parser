@@ -162,7 +162,13 @@ func (pkg *pkgData) parseFunc(obj *types.Func) {
 
 func (pkg *pkgData) parseType(obj *types.TypeName) {
 	if obj.IsAlias() {
-		pkg.getTypeName(obj.Type().(*types.Alias), "")
+		if aliasT, ok := obj.Type().(*types.Alias); ok {
+			pkg.getTypeName(aliasT, "")
+		} else {
+			aliasName := getTypeName(obj)
+			target := pkg.getTypeName(obj.Type(), "")
+			pkg.Aliases[aliasName] = alias{Target: target}
+		}
 		return
 	}
 
