@@ -1,3 +1,5 @@
+//go:debug gotypesalias=1
+
 package main
 
 import (
@@ -159,12 +161,8 @@ func (pkg *pkgData) parseFunc(obj *types.Func) {
 }
 
 func (pkg *pkgData) parseType(obj *types.TypeName) {
-	name := fmt.Sprintf("%s.%s", obj.Pkg().Path(), obj.Name())
 	if obj.IsAlias() {
-		target := pkg.getTypeName(obj.Type(), name)
-		if permitInvalid || !strings.Contains(target, "invalid type") {
-			pkg.Aliases[name] = alias{Target: target}
-		}
+		pkg.getTypeName(obj.Type().(*types.Alias), "")
 		return
 	}
 
@@ -179,6 +177,8 @@ func (pkg *pkgData) parseType(obj *types.TypeName) {
 	if named.TypeParams() != nil {
 		return
 	}
+
+	name := getTypeName(obj)
 
 	var isInterface bool
 	var typeName, typeUnderlying string
@@ -208,7 +208,7 @@ func (pkg *pkgData) parseType(obj *types.TypeName) {
 		case *types.Named:
 			elTO := elT.Obj()
 			typeName = name
-			typeUnderlying = fmt.Sprintf("%s.%s*", elTO.Pkg().Path(), elTO.Name())
+			typeUnderlying = getTypeName(elTO)
 		default:
 			doPanic = true
 		}
@@ -301,13 +301,12 @@ func (pkg *pkgData) getTypeName(iface types.Type, name string) string {
 	switch dt := iface.(type) {
 	case *types.Named:
 		obj := dt.Obj()
-		pkg := obj.Pkg()
-		if pkg == nil {
+		if pkg := obj.Pkg(); pkg == nil {
 			// universe scope
 			return obj.Name()
 		}
 		// full package path
-		return fmt.Sprintf("%s.%s", pkg.Path(), obj.Name())
+		return getTypeName(obj)
 	case *types.Basic:
 		return dt.String()
 	case *types.Pointer:
@@ -333,6 +332,12 @@ func (pkg *pkgData) getTypeName(iface types.Type, name string) string {
 		}
 		pkg.parseStruct(name, dt)
 		return name
+	case *types.Alias:
+		obj := dt.Obj()
+		aliasName := getTypeName(obj)
+		targetName := pkg.getTypeName(types.Unalias(dt), "alias_"+aliasName)
+		pkg.Aliases[aliasName] = alias{Target: targetName}
+		return aliasName
 	default:
 		_ = dt.(*types.Named)
 		panic("unreachable")
@@ -366,4 +371,8 @@ func (pkg *pkgData) parseStruct(name string, obj *types.Struct) {
 		}
 	}
 	pkg.Structs[name] = structDef{Fields: fields}
+}
+
+func getTypeName(tn *types.TypeName) string {
+	return fmt.Sprintf("%s.%s", tn.Pkg().Path(), tn.Name())
 }
