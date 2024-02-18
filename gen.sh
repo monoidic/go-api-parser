@@ -25,15 +25,14 @@ build_for_tag() {
 	echo $tag
 	git -C $go_dir checkout $tag &>/dev/null
 
-    (
+	(
 		for sum in $(find $root -name go.sum); do
 			cd $(dirname $sum)
 			go mod download
-    	done
+		done
 	)
 
-
-	time ./go-api-parser -get_cgo -permit_invalid -src=$root -out=results/${tag}.json -version=$tag || exit $?
+	time ./go-api-parser -get_cgo -src=$root -out=results/${tag}.json -version=$tag || exit $?
 }
 
 main() {
