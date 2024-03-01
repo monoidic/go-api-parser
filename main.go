@@ -21,13 +21,10 @@ import (
 /* TODO parse:
 * more/better dedup groups in archSplit?
 
-* handle type aliased structs, e.g internal/fuzz.CorpusEntry, better,
-  instead of creating a bunch of anonymous struct definitions everywhere they appear
-  in function signatures or in structs
 
 * get rid of all of those "invalid type"s
 
-*/
+ */
 
 // just what's considered to have first-class support (all of these are available after 1.5)
 // for line in $(go tool dist list -json | jq -r '.[] | select(.FirstClass == true) | .GOOS + "-" + .GOARCH'); do echo $line; echo ${line}-cgo; done | jq -Rsc 'split("\n") | .[:-1]'
@@ -47,15 +44,21 @@ func check1[T any](arg1 T, err error) T {
 }
 
 func dirwalk(ch chan<- string) {
+	for dir := range dirWalkF {
+		ch <- dir
+	}
+	close(ch)
+}
+
+func dirWalkF(yield func(V string) bool) {
 	var st stack[string]
 	st.push(".")
 
 	for {
 		root, success := st.pop()
-		if !success {
-			break
+		if !(success && yield(root)) {
+			return
 		}
-		ch <- root
 
 		var subdirs []string
 
@@ -71,8 +74,6 @@ func dirwalk(ch chan<- string) {
 
 		st.pushMultipleRev(subdirs)
 	}
-
-	close(ch)
 }
 
 // extract parts common to subsets of architectures into separate architecture
@@ -187,7 +188,7 @@ func pkgBuild(inCh <-chan buildInfo, outCh chan<- pkgArch, wg *sync.WaitGroup) {
 	for bi := range inCh {
 		conf.Env = getEnv(bi.arch)
 		conf.Dir = bi.path
-		conf.ParseFile = parseDiscards[bi.arch]
+		conf.ParseFile = parseDiscardFuncBody
 		newPkg := check1(packages.Load(&conf, bi.path))
 		if len(newPkg) != 1 {
 			panic(len(newPkg))
@@ -279,7 +280,6 @@ func lateInit() {
 	architectures = getArchitectures()
 	architectureSet = makeSet(architectures)
 	buildConstraints = getBuildConstraints()
-	parseDiscards = getParseDiscards()
 }
 
 func main() {
@@ -314,7 +314,7 @@ func main() {
 
 	go dirwalk(dirChan)
 
-	for i := 0; i < numProcs; i++ {
+	for range numProcs {
 		go pkgFilter(dirChan, filteredChan, &pkgParseWg)
 		go pkgBuild(filteredChan, buildChan, &buildWg)
 		go pkgDeps(buildChan, depsChan, &depsWg)

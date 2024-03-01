@@ -3,119 +3,17 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"go/types"
-	"os"
-	"os/exec"
 	"strings"
 
 	"golang.org/x/tools/go/types/typeutil"
 )
 
 type parseFunc func(fset *token.FileSet, filename string, src []byte) (*ast.File, error)
-
-var parseDiscards map[string]parseFunc
-
-func getParseDiscards() map[string]parseFunc {
-	ret := make(map[string]parseFunc, len(architectures))
-	for _, arch := range architectures {
-		if getCgo {
-			ret[arch] = getParseDiscard(arch)
-		} else {
-			ret[arch] = parseDiscardFuncBody
-		}
-	}
-
-	return ret
-}
-
-func getParseDiscard(arch string) parseFunc {
-	if !strings.Contains(arch, "cgo") {
-		return parseDiscardFuncBody
-	}
-	split := strings.Split(arch, "-")
-	if len(split) != 3 {
-		panic(arch)
-	}
-
-	goos := split[0]
-	goarch := split[1]
-
-	if goos == "darwin" {
-		// not handled
-		return parseDiscardFuncBody
-	}
-
-	var triplet, suffix string
-
-	switch fmt.Sprintf("%s-%s", goos, goarch) {
-	case "linux-386":
-		triplet = "i686-linux-gnu"
-	case "linux-amd64":
-		triplet = "x86_64-linux-gnu"
-	case "linux-arm":
-		triplet = "arm-linux-gnueabihf"
-	case "linux-arm64":
-		triplet = "aarch64-linux-gnu"
-	case "windows-386":
-		triplet = "i686-w64-mingw32"
-		suffix = "-win32"
-	case "windows-amd64":
-		triplet = "x86_64-w64-mingw32"
-		suffix = "-win32"
-	}
-
-	env := append(
-		os.Environ(),
-		fmt.Sprintf("GOOS=%s", goos),
-		fmt.Sprintf("GOARCH=%s", goarch),
-		fmt.Sprintf("CC=%s-gcc%s", triplet, suffix),
-		fmt.Sprintf("CXX=%s-g++%s", triplet, suffix),
-		fmt.Sprintf("AR=%s-ar", triplet),
-	)
-
-	return func(fset *token.FileSet, filename string, src []byte) (*ast.File, error) {
-		f, err := parser.ParseFile(fset, filename, src, 0)
-		if err != nil {
-			return nil, err
-		}
-
-		for _, pkg := range f.Imports {
-			if path := pkg.Path; path != nil && path.Value == "\"C\"" {
-				var buf, errBuf bytes.Buffer
-				dir := check1(os.MkdirTemp("", "go-api-parser"))
-				defer os.RemoveAll(dir)
-				cmd := exec.Command("go", "tool", "cgo", "-godefs", "-objdir", dir, filename)
-				cmd.Env = env
-				cmd.Stdout = &buf
-				cmd.Stderr = &errBuf
-				err = cmd.Run()
-				if err != nil {
-					panic(fmt.Sprintf("%s %s %s", filename, triplet, errBuf.String()))
-				}
-				src = buf.Bytes()
-				f, err = parser.ParseFile(fset, filename, src, 0)
-				if err != nil {
-					return nil, err
-				}
-				break
-			}
-		}
-
-		for _, decl := range f.Decls {
-			if funcDecl, ok := decl.(*ast.FuncDecl); ok {
-				funcDecl.Body = nil
-			}
-		}
-
-		return f, nil
-	}
-
-}
 
 func parseDiscardFuncBody(fset *token.FileSet, filename string, src []byte) (*ast.File, error) {
 	f, err := parser.ParseFile(fset, filename, src, 0)
@@ -291,7 +189,7 @@ func (pkg *pkgData) parseMethod(method types.Object) {
 func (pkg *pkgData) tupToSlice(tup *types.Tuple, name string) []namedType {
 	tupLen := tup.Len()
 	out := make([]namedType, tupLen)
-	for i := 0; i < tupLen; i++ {
+	for i := range tupLen {
 		param := tup.At(i)
 
 		out[i] = namedType{
@@ -363,7 +261,7 @@ func (pkg *pkgData) parseMethods(obj *types.TypeName) {
 func (pkg *pkgData) parseStruct(name string, obj *types.Struct) {
 	numFields := obj.NumFields()
 	fields := make([]namedType, numFields)
-	for i := 0; i < numFields; i++ {
+	for i := range numFields {
 		field := obj.Field(i)
 		// for "anonymous" struct members, e.g database/sql.Tx.stmts
 		fieldPath := fmt.Sprintf("%s.%s", name, field.Name())

@@ -274,6 +274,38 @@ var unixOS = map[string]bool{
 	"solaris":   true,
 }
 
+var zigOsMap = map[string]string{
+	"linux":   "linux",
+	"windows": "windows",
+	"darwin":  "macos",
+}
+
+var zigArchMap = map[string]string{
+	"386":   "x86",
+	"amd64": "x86_64",
+	"arm":   "arm",
+	"arm64": "aarch64",
+}
+
+func getZigTarget(goos, goarch string) string {
+	// special case
+	if goos == "linux" && goarch == "arm" {
+		return "arm-linux-gnueabihf"
+	}
+
+	arch, ok := zigArchMap[goarch]
+	if !ok {
+		panic(goarch)
+	}
+
+	os, ok := zigOsMap[goos]
+	if !ok {
+		panic(goarch)
+	}
+
+	return fmt.Sprintf("%s-%s", arch, os)
+}
+
 // parse os-arch[-cgo]
 func getEnv(arch string) []string {
 	out := os.Environ()
@@ -281,12 +313,16 @@ func getEnv(arch string) []string {
 		return append(out, "GOARCH=amd64", "GOOS=linux", "CGO_ENABLED=0")
 	}
 
+	var goos, goarch string
+
 	hasCGO := false
 	for _, s := range strings.Split(arch, "-") {
 		if knownArchSet.Contains(s) {
 			out = append(out, fmt.Sprintf("GOARCH=%s", s))
+			goarch = s
 		} else if knownOSSet.Contains(s) {
 			out = append(out, fmt.Sprintf("GOOS=%s", s))
+			goos = s
 		} else if s == "cgo" {
 			hasCGO = true
 		} else {
@@ -295,7 +331,14 @@ func getEnv(arch string) []string {
 	}
 
 	if hasCGO {
-		out = append(out, "CGO_ENABLED=1")
+		target := getZigTarget(goos, goarch)
+		out = append(
+			out,
+			"CGO_ENABLED=1",
+			fmt.Sprintf("CC=zig cc -target %s", target),
+			fmt.Sprintf("CXX=zig c++ -target %s", target),
+			fmt.Sprintf("AR=zig ar -target %s", target),
+		)
 	} else {
 		out = append(out, "CGO_ENABLED=0")
 	}

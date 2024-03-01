@@ -32,12 +32,12 @@ build_for_tag() {
 		done
 	)
 
-	time ./go-api-parser -get_cgo -src=$root -out=results/${tag}.json -version=$tag || exit $?
+	time ./go-api-parser -permit_invalid -get_cgo -src=$root -out=results/${tag}.json -version=$tag || exit $?
 }
 
 main() {
 	# ensure latest code is being used
-	go build
+	GOEXPERIMENT=rangefunc go build
 	setup_fake_goroot
 	trap cleanup_fake_goroot EXIT
 	export GOROOT="$fake_goroot"
