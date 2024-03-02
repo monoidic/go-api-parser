@@ -87,7 +87,7 @@ func getArchitectures() (out []string) {
 					"darwin-arm64", "darwin-arm64-cgo", "linux-arm64",
 					"linux-arm64-cgo", "linux-ppc64le", "linux-ppc64le-cgo", "solaris-amd64-cgo",
 				*/
-				"darwin-arm64", "darwin-arm64-cgo", "linux-arm64", "linux-arm64-cgo",
+				"linux-arm64", "linux-arm64-cgo",
 			},
 		},
 		{
@@ -145,8 +145,9 @@ func getArchitectures() (out []string) {
 		{
 			// https://go.dev/doc/go1.16#ports
 			version: "v1.16",
-			archs:   []string{
+			archs: []string{
 				/*"ios-arm64", "ios-arm64-cgo", "ios-amd64", "ios-amd64-cgo", "openbsd-mips64", "linux-riscv64-cgo",*/
+				"darwin-arm64", "darwin-arm64-cgo",
 			},
 		},
 		{
