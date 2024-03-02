@@ -38,11 +38,11 @@ func getArchitectures() (out []string) {
 		"windows-amd64-cgo",
 		"linux-amd64",
 		"linux-amd64-cgo",
-		// should be fine above here
-		// TODO track these down somehow
 		/*"linux-ppc64",*/
 		// // added in 1.11, but this is not going to be useful here
 		//"js-wasm",
+		// // added in 1.21, also not useful here
+		//"wasip1-wasm",
 	}
 
 	versionTable := []struct {
@@ -147,6 +147,7 @@ func getArchitectures() (out []string) {
 			version: "v1.16",
 			archs: []string{
 				/*"ios-arm64", "ios-arm64-cgo", "ios-amd64", "ios-amd64-cgo", "openbsd-mips64", "linux-riscv64-cgo",*/
+				// darwin-arm64(-cgo) before this point was really ios-arm64
 				"darwin-arm64", "darwin-arm64-cgo",
 			},
 		},
@@ -165,7 +166,10 @@ func getArchitectures() (out []string) {
 			version: "v1.20",
 			archs:   []string{ /*"freebsd-riscv64", "freebsd-riscv64-cgo"*/ },
 		},
-		// wasip1-wasm added in 1.21, but not interesting here
+		{
+			version: "v1.22",
+			archs:   []string{ /*openbsd-ppc64*/ },
+		},
 	}
 
 	version := "v" + goVersion[2:] // e.g go1.20.2 to v1.20.2
