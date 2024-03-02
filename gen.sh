@@ -32,7 +32,7 @@ build_for_tag() {
 		done
 	)
 
-	time ./go-api-parser -permit_invalid -get_cgo -src=$root -out=results/${tag}.json -version=$tag || exit $?
+	time ./go-api-parser -get_cgo -src=$root -out=results/${tag}.json -version=$tag || exit $?
 }
 
 main() {
