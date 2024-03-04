@@ -285,7 +285,7 @@ func lateInit() {
 func main() {
 	flag.StringVar(&sourceRoot, "src", "", "path to directory with source code to examine")
 	flag.StringVar(&outPath, "out", "", "path to file to dump json results in")
-	flag.StringVar(&goVersion, "version", runtime.Version(), "go version to use, in go1.${minor}.${patch} format")
+	flag.StringVar(&goVersion, "version", strings.Split(runtime.Version(), " ")[0], "go version to use, in go1.${minor}.${patch} format")
 	flag.BoolVar(&permitInvalid, "permit_invalid", false, "permit \"invalid type\" results")
 	flag.BoolVar(&getCgo, "get_cgo", false, "get per-arch cgo definitions")
 	flag.Parse()

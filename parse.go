@@ -13,8 +13,6 @@ import (
 	"golang.org/x/tools/go/types/typeutil"
 )
 
-type parseFunc func(fset *token.FileSet, filename string, src []byte) (*ast.File, error)
-
 func parseDiscardFuncBody(fset *token.FileSet, filename string, src []byte) (*ast.File, error) {
 	f, err := parser.ParseFile(fset, filename, src, 0)
 	if err != nil {
@@ -32,10 +30,6 @@ func parseDiscardFuncBody(fset *token.FileSet, filename string, src []byte) (*as
 
 func (pkg *pkgData) parseFunc(obj *types.Func) {
 	signature := obj.Type().(*types.Signature)
-	// do not handle generic functions
-	if signature.TypeParams() != nil {
-		return
-	}
 
 	name := obj.FullName()
 
@@ -50,6 +44,15 @@ func (pkg *pkgData) parseFunc(obj *types.Func) {
 				}
 			}
 		}
+	}
+
+	if tp := signature.TypeParams(); tp != nil {
+		pkg.GenericFuncs[name] = genericFuncData{
+			Params:     params,
+			Results:    results,
+			TypeParams: getTypeParamArr(tp),
+		}
+		return
 	}
 
 	pkg.Funcs[name] = funcData{
@@ -77,10 +80,6 @@ func (pkg *pkgData) parseType(obj *types.TypeName) {
 		}
 		panic(obj)
 	}
-	// do not handle generic types
-	if named.TypeParams() != nil {
-		return
-	}
 
 	name := getTypeName(obj)
 
@@ -89,7 +88,7 @@ func (pkg *pkgData) parseType(obj *types.TypeName) {
 
 	switch t := named.Underlying().(type) {
 	case *types.Struct:
-		pkg.parseStruct(pkg.getTypeName(obj.Type(), ""), t)
+		pkg.parseStruct(pkg.getTypeName(obj.Type(), ""), t, named.TypeParams())
 	case *types.Interface:
 		isInterface = true
 	case *types.Basic:
@@ -234,7 +233,7 @@ func (pkg *pkgData) getTypeName(iface types.Type, name string) string {
 		if name == "" {
 			panic(iface)
 		}
-		pkg.parseStruct(name, dt)
+		pkg.parseStruct(name, dt, nil)
 		return name
 	case *types.Alias:
 		obj := dt.Obj()
@@ -242,6 +241,8 @@ func (pkg *pkgData) getTypeName(iface types.Type, name string) string {
 		targetName := pkg.getTypeName(types.Unalias(dt), "alias_"+aliasName)
 		pkg.Aliases[aliasName] = alias{Target: targetName}
 		return aliasName
+	case *types.TypeParam:
+		return dt.String()
 	default:
 		_ = dt.(*types.Named)
 		panic("unreachable")
@@ -258,7 +259,7 @@ func (pkg *pkgData) parseMethods(obj *types.TypeName) {
 	}
 }
 
-func (pkg *pkgData) parseStruct(name string, obj *types.Struct) {
+func (pkg *pkgData) parseStruct(name string, obj *types.Struct, typeParams *types.TypeParamList) {
 	numFields := obj.NumFields()
 	fields := make([]namedType, numFields)
 	for i := range numFields {
@@ -274,9 +275,28 @@ func (pkg *pkgData) parseStruct(name string, obj *types.Struct) {
 			DataType: dataType,
 		}
 	}
+
+	if typeParams != nil {
+		pkg.GenericStructs[name] = genericStructDef{
+			Fields:     fields,
+			TypeParams: getTypeParamArr(typeParams),
+		}
+		return
+	}
+
 	pkg.Structs[name] = structDef{Fields: fields}
 }
 
 func getTypeName(tn *types.TypeName) string {
 	return fmt.Sprintf("%s.%s", tn.Pkg().Path(), tn.Name())
+}
+
+func getTypeParamArr(typeParams *types.TypeParamList) []string {
+	tParamsArr := make([]string, typeParams.Len())
+
+	for i := range typeParams.Len() {
+		tParamsArr[i] = typeParams.At(i).String()
+	}
+
+	return tParamsArr
 }
