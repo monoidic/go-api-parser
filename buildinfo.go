@@ -341,8 +341,8 @@ func getEnv(arch string) []string {
 			out,
 			"CGO_ENABLED=1",
 			fmt.Sprintf("CC=zig cc -target %s", target),
-			fmt.Sprintf("CXX=zig c++ -target %s", target),
-			fmt.Sprintf("AR=zig ar -target %s", target),
+			"CXX=zig c++",
+			"AR=zig ar",
 		)
 	} else {
 		out = append(out, "CGO_ENABLED=0")
