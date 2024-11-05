@@ -216,7 +216,7 @@ func (pkg *pkgData) getTypeName(iface types.Type, name string) string {
 		return pkg.getTypeName(dt.Elem(), name+"|slice") + "[]"
 	case *types.Array:
 		arrLen := dt.Len()
-		name = fmt.Sprintf("%s|[%d]arr", name, arrLen)
+		name = fmt.Sprintf("%s|arr", name)
 		return fmt.Sprintf("%s[%d]", pkg.getTypeName(dt.Elem(), name), arrLen)
 	case *types.Map:
 		return "map"
