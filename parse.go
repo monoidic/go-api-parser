@@ -1,5 +1,3 @@
-//go:debug gotypesalias=1
-
 package main
 
 import (
@@ -204,7 +202,7 @@ func (pkg *pkgData) getTypeName(iface types.Type, name string) string {
 	switch dt := iface.(type) {
 	case *types.Named:
 		obj := dt.Obj()
-		if pkg := obj.Pkg(); pkg == nil {
+		if obj.Pkg() == nil {
 			// universe scope
 			return obj.Name()
 		}
@@ -288,7 +286,12 @@ func (pkg *pkgData) parseStruct(name string, obj *types.Struct, typeParams *type
 }
 
 func getTypeName(tn *types.TypeName) string {
-	return fmt.Sprintf("%s.%s", tn.Pkg().Path(), tn.Name())
+	pkg := tn.Pkg()
+	if pkg == nil {
+		// universe scope
+		return tn.Name()
+	}
+	return fmt.Sprintf("%s.%s", pkg.Path(), tn.Name())
 }
 
 func getTypeParamArr(typeParams *types.TypeParamList) []string {
